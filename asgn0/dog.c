@@ -1,0 +1,50 @@
+#include<fcntl.h>
+#include<unistd.h>
+#include<err.h>
+#include<string.h>
+
+#define BUFFER_SIZE 3200
+
+void print(int in, int out) {
+	char buffer[BUFFER_SIZE];
+	while(read(in, buffer, 1)) {
+		write(out, buffer, 1);
+	}
+	memset(buffer, 0, BUFFER_SIZE);
+}
+
+int main(int argc, char* argv[]) {
+	
+	int i, fd;
+	char buffer[BUFFER_SIZE];
+
+	// if no args
+	if(argc < 2) {
+		print(STDIN_FILENO, STDOUT_FILENO);
+	}
+
+	for(i = 1; i < argc; i++) {
+
+		// check if -
+		if(strcmp(argv[i], "-") == 0) {
+			print(STDIN_FILENO, STDOUT_FILENO);
+			continue;
+		}
+
+		// open file
+		fd = open(argv[i], O_RDONLY);
+
+		// check if file exists
+		if(fd < 0) {
+			warn("%s", argv[i]);
+			continue;
+		}
+
+		// write file content to stdout
+		print(fd, STDOUT_FILENO);
+
+		close(fd);
+	}
+
+	return 0;
+}
