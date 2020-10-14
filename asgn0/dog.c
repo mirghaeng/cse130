@@ -3,7 +3,7 @@
 #include<err.h>
 #include<string.h>
 
-#define BUFFER_SIZE 3200
+#define BUFFER_SIZE 30000
 
 void print(int in, int out) {
 	char buffer[BUFFER_SIZE];
