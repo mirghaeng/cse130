@@ -16,7 +16,6 @@ void print(int in, int out) {
 int main(int argc, char* argv[]) {
 	
 	int i, fd;
-	char buffer[BUFFER_SIZE];
 
 	// if no args
 	if(argc < 2) {
