@@ -5,8 +5,7 @@
 
 #define BUFFER_SIZE 30000
 
-void print(int in, int out) {
-	char buffer[BUFFER_SIZE];
+void print(int in, int out, char* buffer) {
 	while(read(in, buffer, 1)) {
 		write(out, buffer, 1);
 	}
@@ -16,17 +15,18 @@ void print(int in, int out) {
 int main(int argc, char* argv[]) {
 	
 	int i, fd;
+	char buffer[BUFFER_SIZE];
 
 	// if no args
 	if(argc < 2) {
-		print(STDIN_FILENO, STDOUT_FILENO);
+		print(STDIN_FILENO, STDOUT_FILENO, buffer);
 	}
 
 	for(i = 1; i < argc; i++) {
 
 		// check if -
 		if(strcmp(argv[i], "-") == 0) {
-			print(STDIN_FILENO, STDOUT_FILENO);
+			print(STDIN_FILENO, STDOUT_FILENO, buffer);
 			continue;
 		}
 
@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// write file content to stdout
-		print(fd, STDOUT_FILENO);
+		print(fd, STDOUT_FILENO, buffer);
 
 		close(fd);
 	}
