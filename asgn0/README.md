@@ -1,4 +1,4 @@
-Miranda Eng
+Miranda Eng  
 Shirley Phuong
 
 - dog.c: contains the code for the program that reads file data or standard input to standard output.
