@@ -3,9 +3,10 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <string.h>
 #include <err.h>
+
+#include <stdio.h> // remove this and printf()s later
 
 unsigned long getaddr(char *name) {
 	unsigned long res;
@@ -63,16 +64,22 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		// socket read
-		char request[1000], buffer[100];
+		// socket read request
+		char header[10000], buffer[100];
 		char* end_of_header;
 		while(recv(commfd, buffer, sizeof(char), 0) > 0) {
 			write(STDOUT_FILENO, buffer, sizeof(char));
-			strcat(request, buffer);
-			if((end_of_header = strstr(request, "\r\n\r\n")) != NULL) { break; }
+			strcat(header, buffer);
+			end_of_header = strstr(header, "\r\n\r\n");
+			if(end_of_header != NULL) { break; }
 			memset(&buffer, 0, sizeof(buffer));
 		}
-		memset(&header, 0, sizeof());
+		
+		char* type = strtok(header, " ");
+		printf("type: %s\n", type);
+		printf("header: %s\n", header);
+		memset(&header, 0, sizeof(header));
+		printf("reached end of while\n");
 	}
 	close(commfd);
 }
