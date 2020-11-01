@@ -65,7 +65,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// socket read request
-		char header[10000], buffer[100];
+		char header[10000], buffer[100], response[100];
 		char* end_of_header;
 		while(recv(commfd, buffer, sizeof(char), 0) > 0) {
 			write(STDOUT_FILENO, buffer, sizeof(char));
@@ -80,6 +80,12 @@ int main(int argc, char* argv[]) {
 		printf("header: %s\n", header);
 		memset(&header, 0, sizeof(header));
 		printf("reached end of while\n");
+
+		strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nNice");
+		send(commfd, response, strlen(response), 0);
+
+
+
 	}
 	close(commfd);
 }
