@@ -8,6 +8,7 @@
 #include <err.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <fcntl.h>
 
 #define SIZE 100
 #define BAD_REQUEST 0
@@ -81,6 +82,8 @@ int main(int argc, char *argv[]) {
     char header2[10000];
     char body[10000];
     char response[10000];
+    char fileContent[10000];
+    char attachContentLength[100];
 
     char *request;
     char *fileName;
@@ -133,32 +136,50 @@ int main(int argc, char *argv[]) {
     }
 
     int fileSize;
+    int fd;
     if (strcmp(request, "GET") == 0) {
         if (access(fileName, F_OK) != -1) {
             printf("%s\n", "The file exists");
-            if (access(fileName, R_OK) != -1) {
+
+            if (access(fileName, R_OK) == -1) {
                 // 403 Forbidden
                 printf("Read permissions not granted");
                 goto sendResponse;
             }
-
-            // read file and write to response;
+            
             stat(fileName, &st);
             fileSize = st.st_size;
             printf("%d\n", fileSize);
+
+            // read the file
+            fd = open(fileName, O_RDONLY);
+            while (read(fd, buf, 1)) {
+                strcat(fileContent, buf);
+                memset(&buf, 0, sizeof(buf));
+
+            }
+
+            // send response back
+            sprintf(response, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", fileSize);
+            strcat(response, fileContent);
+            send(comm_fd, response, strlen(response), 0);
+            goto sentResponseAlready;
+
         }
         else {
+            // 404 File Not Found
             printf("%s\n", "The file doesn't exist");
             goto sendResponse;
         }
     }
 
 
-    // only for PUT
-    // while (recv(comm_fd, buf, sizeof(char), 0) > 0) {
-    //     write(STDOUT_FILENO, buf, sizeof(char));
-    //     strcat(body, buf);
-    //     memset(&buf, 0, sizeof(buf));
+	// while (recv(comm_fd, buf, sizeof(char), 0) > 0) {
+	// 	write(STDOUT_FILENO, buf, sizeof(char));
+    //     strcat(header, buf);
+    //     end_of_header = strstr(header, "\r\n\r\n");
+    //     if (end_of_header != NULL) { break; }
+	// 	memset(&buf, 0, sizeof(buf));
     // }
 
 
@@ -167,9 +188,10 @@ int main(int argc, char *argv[]) {
         strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nhello\r\n");
         send(comm_fd, response, strlen(response), 0);
 
+    sentResponseAlready:
 
     memset(&header, 0, sizeof(header));
-    //free(request);
+    memset(&response, 0, sizeof(response));
     close(comm_fd);
   }
 }
