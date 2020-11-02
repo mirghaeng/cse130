@@ -228,7 +228,7 @@ int main(int argc, char *argv[]) {
             }
 
             // read body and write to fileName
-            put_fd = open(fileName, O_CREAT | O_WRONLY | O_TRUNC);
+            put_fd = open(fileName, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
             int bodyLength = strlen(body);
             write(put_fd, body, bodyLength);
