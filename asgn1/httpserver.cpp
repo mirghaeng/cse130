@@ -8,6 +8,17 @@
 
 #include <stdio.h> // remove this and printf()s later
 
+const char* getStatus(int code) {
+	switch(code) {
+		case 200: return "ok";
+		case 201: return "created";
+		case 400: return "bad request";
+		case 403: return "forbidden";
+		case 404: return "not found";
+		case 500: return "internal server error";
+	}
+}
+
 unsigned long getaddr(char *name) {
 	unsigned long res;
 	struct addrinfo hints;
@@ -23,6 +34,11 @@ unsigned long getaddr(char *name) {
 	res = ((struct sockaddr_in*) info->ai_addr)->sin_addr.s_addr;
 	freeaddrinfo(info);
 	return res;
+}
+
+void httpresponse(char* response, int code, int length) {
+	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
+	send(commfd, response, strlen(response), 0);
 }
 
 int main(int argc, char* argv[]) {
@@ -74,16 +90,51 @@ int main(int argc, char* argv[]) {
 			if(end_of_header != NULL) { break; }
 			memset(&buffer, 0, sizeof(buffer));
 		}
-		
+
+		// check HTTP/1.1
+		char* ptrhttp = strstr(header, "HTTP/1.1");
+		if(ptrhttp == NULL) {
+			// 400 Bad Request
+		}
+
+		// get request type
 		char* type = strtok(header, " ");
-		printf("type: %s\n", type);
-		printf("header: %s\n", header);
+			
+		// get filename
+		char* filename = strtok(NULL, " ");
+		filename++;
+
+		// zero header ?
 		memset(&header, 0, sizeof(header));
+
+		// check filename length (= 10 chars)
+		if(strlen(filename) != 10) {
+			// 400 Bad Request
+		}
+
+		// check filename is alphanumeric
+		for(char* i = filename; *i != '\0'; i++) {
+			if(isalnum(*i) == 0) {
+				// 400 Bad Request
+			}
+		}
+		
+		struct stat st;
+		int filesize;
+		if(strcmp(type, "GET") == 0) {
+			if(access(filename, F_OK) == 1) {
+				// 404 File Not Found
+			} else {
+				if(access(filename, R_OK) == -1) {
+					// 403 Forbidden
+				}
+				stat(filename, &st);
+				filesize = st.st_size;
+			}
+		}
 
 		strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nNice\r\n");
 		send(commfd, response, strlen(response), 0);
-
-
 
 	}
 	close(commfd);
