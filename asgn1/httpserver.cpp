@@ -132,10 +132,6 @@ int main(int argc, char* argv[]) {
 				filesize = st.st_size;
 			}
 		}
-
-		strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nNice\r\n");
-		send(commfd, response, strlen(response), 0);
-
 	}
 	close(commfd);
 }
