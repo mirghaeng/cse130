@@ -1,9 +1,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <err.h>
 
 #include <stdio.h> // remove this and printf()s later
@@ -36,7 +38,7 @@ unsigned long getaddr(char *name) {
 	return res;
 }
 
-void httpresponse(char* response, int code, int length) {
+void httpresponse(int commfd, char* response, int code, int length) {
 	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
 	send(commfd, response, strlen(response), 0);
 }
@@ -104,9 +106,6 @@ int main(int argc, char* argv[]) {
 		char* filename = strtok(NULL, " ");
 		filename++;
 
-		// zero header ?
-		memset(&header, 0, sizeof(header));
-
 		// check filename length (= 10 chars)
 		if(strlen(filename) != 10) {
 			// 400 Bad Request
@@ -132,6 +131,9 @@ int main(int argc, char* argv[]) {
 				filesize = st.st_size;
 			}
 		}
+
+		// zero header
+		memset(&header, 0, sizeof(header));
 	}
 	close(commfd);
 }
