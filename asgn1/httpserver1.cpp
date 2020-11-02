@@ -83,8 +83,8 @@ int main(int argc, char *argv[]) {
     char body[10000];
     char response[10000];
     char fileContent[10000];
-    char attachContentLength[100];
 
+    //char contentLength[100];
     char *request;
     char *fileName;
 
@@ -101,16 +101,16 @@ int main(int argc, char *argv[]) {
     // get request type
     strcpy(header2, header);
     request = strtok(header2, " ");
-    printf("%s\n", request);
+    //printf("%s\n", request);
 
     // get file name
     fileName = strtok(NULL, " ");
     fileName += 1;
-    printf("%s\n", fileName);
+    //printf("%s\n", fileName);
 
     // check if file name is 10 characters
     int fileLength = strlen(fileName);
-    printf("%d\n", fileLength);
+    //printf("%d\n", fileLength);
     if (fileLength != 10) {
         // 400 Bad Request
         printf("%s\n", "File length is not 10");
@@ -135,6 +135,7 @@ int main(int argc, char *argv[]) {
         goto sendResponse;
     }
 
+    // GET requests
     int fileSize;
     int fd;
     if (strcmp(request, "GET") == 0) {
@@ -149,7 +150,7 @@ int main(int argc, char *argv[]) {
             
             stat(fileName, &st);
             fileSize = st.st_size;
-            printf("%d\n", fileSize);
+            //printf("%d\n", fileSize);
 
             // read the file
             fd = open(fileName, O_RDONLY);
@@ -163,6 +164,7 @@ int main(int argc, char *argv[]) {
             sprintf(response, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n", fileSize);
             strcat(response, fileContent);
             send(comm_fd, response, strlen(response), 0);
+            close(fd);
             goto sentResponseAlready;
 
         }
@@ -174,15 +176,50 @@ int main(int argc, char *argv[]) {
     }
 
 
-	// while (recv(comm_fd, buf, sizeof(char), 0) > 0) {
-	// 	write(STDOUT_FILENO, buf, sizeof(char));
-    //     strcat(header, buf);
-    //     end_of_header = strstr(header, "\r\n\r\n");
-    //     if (end_of_header != NULL) { break; }
-	// 	memset(&buf, 0, sizeof(buf));
-    // }
+    // PUT requests
+    int put_fd;
+    if (strcmp(request, "PUT") == 0) {
+        // get content length and body
+        char* ret2;
+        int contentLength, j;
+        ret2 = strstr(header, "Content-Length");
 
+        if (ret2 != NULL) {
+            sscanf(ret2, "Content-Length: %d", &contentLength);
+            j = contentLength;
 
+            // get body if content length is provided
+            memset(&buf, 0, sizeof(buf));
+            while (j > 0) {
+                int n = recv(comm_fd, buf, sizeof(char), 0);
+                write(STDOUT_FILENO, buf, sizeof(char));
+                strcat(body, buf);
+		        memset(&buf, 0, sizeof(buf));
+                j--;
+            }
+        }
+        else {
+            // get body if no content length provided
+            while (recv(comm_fd, buf, sizeof(char), 0) > 0) {
+                write(STDOUT_FILENO, buf, sizeof(char));
+                strcat(body, buf);
+		        memset(&buf, 0, sizeof(buf));
+            }
+        }
+
+        //printf("%s\n", body);
+        // read body and write to fileName
+        put_fd = open(fileName, O_CREAT | O_WRONLY | O_TRUNC);
+
+        int bodyLength = strlen(body);
+        //printf("Body length %d\n", bodyLength);
+        write(put_fd, body, bodyLength);
+
+        sprintf(response, "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
+        send(comm_fd, response, strlen(response), 0);
+        close(put_fd);
+        goto sentResponseAlready;
+    }
 
     sendResponse:
         strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nhello\r\n");
