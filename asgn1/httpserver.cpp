@@ -38,7 +38,7 @@ unsigned long getaddr(char *name) {
 	return res;
 }
 
-void httpresponse(int commfd, char* response, int code, int length) {
+void sendheader(int commfd, char* response, int code, int length) {
 	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
 	send(commfd, response, strlen(response), 0);
 }
@@ -97,6 +97,7 @@ int main(int argc, char* argv[]) {
 		char* ptrhttp = strstr(header, "HTTP/1.1");
 		if(ptrhttp == NULL) {
 			// 400 Bad Request
+			sendheader(commfd, response, 400, 0);		
 		}
 
 		// get request type
@@ -109,12 +110,14 @@ int main(int argc, char* argv[]) {
 		// check filename length (= 10 chars)
 		if(strlen(filename) != 10) {
 			// 400 Bad Request
+			sendheader(commfd, response, 400, 0);
 		}
 
 		// check filename is alphanumeric
 		for(char* i = filename; *i != '\0'; i++) {
 			if(isalnum(*i) == 0) {
 				// 400 Bad Request
+				sendheader(commfd, response, 400, 0);
 			}
 		}
 		
@@ -123,14 +126,18 @@ int main(int argc, char* argv[]) {
 		if(strcmp(type, "GET") == 0) {
 			if(access(filename, F_OK) == 1) {
 				// 404 File Not Found
+				sendheader(commfd, response, 404, 0);
 			} else {
 				if(access(filename, R_OK) == -1) {
 					// 403 Forbidden
+					sendheader(commfd, response, 403, 0);
 				}
 				stat(filename, &st);
 				filesize = st.st_size;
 			}
 		}
+
+		
 
 		// zero header
 		memset(&header, 0, sizeof(header));
