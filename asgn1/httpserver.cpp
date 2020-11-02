@@ -79,9 +79,8 @@ int main(int argc, char* argv[]) {
 		printf("type: %s\n", type);
 		printf("header: %s\n", header);
 		memset(&header, 0, sizeof(header));
-		printf("reached end of while\n");
 
-		strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nNice");
+		strcpy(response, "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nNice\r\n");
 		send(commfd, response, strlen(response), 0);
 
 
