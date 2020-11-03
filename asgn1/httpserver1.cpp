@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <sys/stat.h>
 #include <netdb.h>
 #include <string.h>
@@ -67,7 +68,7 @@ int main(int argc, char *argv[]) {
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = getaddr(argv[1]);
     servaddr.sin_port = htons(port);
-  
+
     n = bind(listen_fd, (struct sockaddr*) &servaddr, sizeof(servaddr));
     if(n < 0) err(1, "bind()");
 

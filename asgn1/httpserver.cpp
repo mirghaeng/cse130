@@ -4,21 +4,22 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <fcntl.h>
 #include <err.h>
-
-#include <stdio.h> // remove this and printf()s later
 
 const char* getStatus(int code) {
 	switch(code) {
-		case 200: return "ok";
-		case 201: return "created";
-		case 400: return "bad request";
-		case 403: return "forbidden";
-		case 404: return "not found";
-		case 500: return "internal server error";
+		case 200: return "OK";
+		case 201: return "Created";
+		case 400: return "Bad Request";
+		case 403: return "Forbidden";
+		case 404: return "Not Found";
+		case 500: return "Internal Server Error";
 	}
+	return NULL;
 }
 
 unsigned long getaddr(char *name) {
@@ -38,20 +39,31 @@ unsigned long getaddr(char *name) {
 	return res;
 }
 
-void sendheader(int commfd, char* response, int code, int length) {
+void sendheader(int commfd, char* response, int code, int length, char* content) {
 	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
+	if(content != NULL) {
+		strcat(response, content);
+	}
 	send(commfd, response, strlen(response), 0);
 }
 
 int main(int argc, char* argv[]) {
 
 	struct sockaddr_in servaddr;
-	int listenfd, n;
+	struct stat st;
+	int listenfd, n, port;
 	int servaddr_length, commfd;
+	int getfd, filesize;
+	int putfd, contentlength;
 	
-	// check cmd arg #
-	if(argc != 3) {
-		printf("USAGE: ./httpserver <address> <port-number>");
+	// check cmd arg # & get port
+	if(argc == 2) {
+		port = 80;
+	} else if(argc == 3) {
+		port = atoi(argv[2]);
+	} else {
+		char usage[] = "USAGE: ./httpserver <address> <port-number>\n";
+		write(STDOUT_FILENO, usage, sizeof(char));
 	}
 
 	// init socket
@@ -62,7 +74,7 @@ int main(int argc, char* argv[]) {
 	memset(&servaddr, 0, sizeof(servaddr));
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_addr.s_addr = getaddr(argv[1]);
-	servaddr.sin_port = htons(atoi(argv[2]));
+	servaddr.sin_port = htons(port);
 
 	// socket bind
 	n = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
@@ -74,73 +86,146 @@ int main(int argc, char* argv[]) {
 
 	while(1) {
 
+		char buf[100] = {0};
+		char header[10000] = {0};
+		char headercpy[10000] = {0};
+		char content[10000] = {0};
+		char response[10000] = {0};
+		char *end_of_header, *type, *filename;
+
 		// socket accept
+		char waiting[] = "Waiting for connection...\n";
+		write(STDOUT_FILENO, waiting, strlen(waiting));
 		servaddr_length = sizeof(servaddr);
 		commfd = accept(listenfd, (struct sockaddr*)&servaddr, (socklen_t*)&servaddr_length);
 		if(commfd < 0) {
 			warn("accept()");
 			continue;
 		}
-
+		
 		// socket read request
-		char header[10000], buffer[100], response[100];
-		char* end_of_header;
-		while(recv(commfd, buffer, sizeof(char), 0) > 0) {
-			write(STDOUT_FILENO, buffer, sizeof(char));
-			strcat(header, buffer);
+		while(recv(commfd, buf, sizeof(char), 0) > 0) {
+			write(STDOUT_FILENO, buf, sizeof(char));
+			strcat(header, buf);
 			end_of_header = strstr(header, "\r\n\r\n");
 			if(end_of_header != NULL) { break; }
-			memset(&buffer, 0, sizeof(buffer));
+			memset(&buf, 0, sizeof(buf));
 		}
-
-		// check HTTP/1.1
-		char* ptrhttp = strstr(header, "HTTP/1.1");
-		if(ptrhttp == NULL) {
-			// 400 Bad Request
-			sendheader(commfd, response, 400, 0);		
-		}
-
+		
 		// get request type
-		char* type = strtok(header, " ");
-			
+		strcpy(headercpy, header);
+		type = strtok(headercpy, " ");
+		
 		// get filename
-		char* filename = strtok(NULL, " ");
+		filename = strtok(NULL, " ");
 		filename++;
-
-		// check filename length (= 10 chars)
+		
+		// check filename length
 		if(strlen(filename) != 10) {
-			// 400 Bad Request
-			sendheader(commfd, response, 400, 0);
-		}
 
+			// 400 Bad Request
+			sendheader(commfd, response, 400, 0, NULL);
+			continue;
+		}
+		
 		// check filename is alphanumeric
 		for(char* i = filename; *i != '\0'; i++) {
 			if(isalnum(*i) == 0) {
+
 				// 400 Bad Request
-				sendheader(commfd, response, 400, 0);
+				sendheader(commfd, response, 400, 0, NULL);
+				continue;
 			}
 		}
-		
-		struct stat st;
-		int filesize;
+
+		// check for HTTP/1.1
+		char* ptrhttp = strstr(header, "HTTP/1.1");
+		if(ptrhttp == NULL) {
+
+			// 400 Bad Request
+			sendheader(commfd, response, 400, 0, NULL);
+			continue;
+		}
+	
+		// handling GET request	
+		memset(&buf, 0, sizeof(buf));
+		memset(&content, 0, sizeof(content));
 		if(strcmp(type, "GET") == 0) {
-			if(access(filename, F_OK) == 1) {
+			if(access(filename, F_OK) == -1) {
+
 				// 404 File Not Found
-				sendheader(commfd, response, 404, 0);
+				sendheader(commfd, response, 404, 0, NULL);
+				continue;
+			} else if(access(filename, R_OK) == -1) {
+
+				// 403 Forbidden
+				sendheader(commfd, response, 403, 0, NULL);
+				continue;
 			} else {
-				if(access(filename, R_OK) == -1) {
-					// 403 Forbidden
-					sendheader(commfd, response, 403, 0);
-				}
+
+				// get file size
 				stat(filename, &st);
 				filesize = st.st_size;
+
+				// get file contents
+				getfd = open(filename, O_RDONLY);
+				while(read(getfd, buf, sizeof(char))) {
+					strcat(content, buf);
+					memset(&buf, 0, sizeof(buf));
+				}
+				close(getfd);
+
+				// 200 OK w/ file contents
+				sendheader(commfd, response, 200, filesize, content);
+				continue;
 			}
+		}		
+		
+		// handling PUT request
+		memset(&buf, 0, sizeof(buf));
+		memset(&content, 0, sizeof(content));
+		if(strcmp(type, "PUT") == 0) {
+
+			// get Content-Length
+			char* ptrlength = strstr(header, "Content-Length:");
+			if(ptrlength != NULL) {
+
+				// get content if Content-Length is provided
+				sscanf(ptrlength, "Content-Length: %d", &contentlength);
+				for(int i = contentlength; i > 0; i--) {
+					n = recv(commfd, buf, sizeof(char), 0);
+					if(n < 0) { warn("recv()"); }
+					if(n == 0) { break; }
+					write(STDOUT_FILENO, buf, sizeof(char));
+					strcat(content, buf);
+					memset(&buf, 0, sizeof(buf));
+				}
+			} else {
+				
+				// get content if Content-Length is not provided
+				while(recv(commfd, buf, sizeof(char), 0) > 0) {
+					write(STDOUT_FILENO, buf, sizeof(char));
+					strcat(content, buf);
+					memset(&buf, 0, sizeof(buf));
+				}
+			}
+
+			// create/overwrite new file in directory
+			putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+			write(putfd, content, strlen(content));
+			close(putfd);
+
+			// 201 Created
+			sendheader(commfd, response, 201, 0, NULL);
 		}
 
-		
-
-		// zero header
+		// clear buffers
 		memset(&header, 0, sizeof(header));
+		memset(&headercpy, 0, sizeof(headercpy));
+		memset(&content, 0, sizeof(content));
+		memset(&response, 0, sizeof(response));
+		
+		// close TCP connection
+		close(commfd);
 	}
-	close(commfd);
 }
