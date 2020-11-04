@@ -89,11 +89,11 @@ int main(int argc, char* argv[]) {
 
 	while(1) {
 
-		char buf[100] = {0};
-		char header[10000] = {0};
-		char headercpy[10000] = {0};
-		char content[10000] = {0};
-		char response[10000] = {0};
+		char buf[100];
+		char header[10000];
+		char headercpy[10000];
+		char content[10000];
+		char response[10000];
 		char *end_of_header, *type, *filename;
 		int errors = NO_ERROR_YET;
 
