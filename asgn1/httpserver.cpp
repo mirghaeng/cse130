@@ -13,6 +13,8 @@
 #define ERROR 1
 #define NO_ERROR_YET 0
 
+// Taking in integer code # and returns corresponding
+// status string
 const char* getStatus(int code) {
 	switch(code) {
 		case 200: return "OK";
@@ -25,6 +27,12 @@ const char* getStatus(int code) {
 	return NULL;
 }
 
+/*
+ * Provided by TA
+ * getaddr returns the numerical representation of the address
+ * identified by *name* as required for an IPv4 address represented
+ * in a struct sockaddr_in.
+ */
 unsigned long getaddr(char *name) {
 	unsigned long res;
 	struct addrinfo hints;
@@ -42,6 +50,7 @@ unsigned long getaddr(char *name) {
 	return res;
 }
 
+// formats HTTP response and sends to client
 void sendheader(int commfd, char* response, int code, int length, char* content) {
 	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
 	if(content != NULL) {
