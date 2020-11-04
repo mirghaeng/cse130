@@ -10,6 +10,9 @@
 #include <fcntl.h>
 #include <err.h>
 
+#define ERROR 1
+#define NO_ERROR_YET 0
+
 const char* getStatus(int code) {
 	switch(code) {
 		case 200: return "OK";
@@ -92,6 +95,7 @@ int main(int argc, char* argv[]) {
 		char content[10000] = {0};
 		char response[10000] = {0};
 		char *end_of_header, *type, *filename;
+		int errors = NO_ERROR_YET;
 
 		// socket accept
 		char waiting[] = "Waiting for connection...\n";
@@ -124,43 +128,50 @@ int main(int argc, char* argv[]) {
 		if(strlen(filename) != 10) {
 
 			// 400 Bad Request
+			errors = ERROR;
 			sendheader(commfd, response, 400, 0, NULL);
-			continue;
 		}
 		
 		// check filename is alphanumeric
 		for(char* i = filename; *i != '\0'; i++) {
-			if(isalnum(*i) == 0) {
+			if((isalnum(*i) == 0) && (errors == NO_ERROR_YET)) {
 
 				// 400 Bad Request
+				errors = ERROR;
 				sendheader(commfd, response, 400, 0, NULL);
-				continue;
 			}
 		}
 
 		// check for HTTP/1.1
 		char* ptrhttp = strstr(header, "HTTP/1.1");
-		if(ptrhttp == NULL) {
+		if((ptrhttp == NULL) && (errors == NO_ERROR_YET)) {
 
 			// 400 Bad Request
+			errors = ERROR;
 			sendheader(commfd, response, 400, 0, NULL);
-			continue;
 		}
+
+		// check for other HTTP/1.1 methods
+        if (((strcmp(type, "OPTIONS") == 0) || (strcmp(type, "HEAD") == 0) || (strcmp(type, "POST") == 0) || (strcmp(type, "DELETE") == 0) || (strcmp(type, "TRACE") == 0) || (strcmp(type, "CONNECT") == 0)) && (errors == NO_ERROR_YET)) {
+            // 500 Internal Service Error
+			errors = ERROR;
+            sendheader(commfd, response, 500, 0, NULL);
+        }
 	
 		// handling GET request	
 		memset(&buf, 0, sizeof(buf));
 		memset(&content, 0, sizeof(content));
-		if(strcmp(type, "GET") == 0) {
+		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
 			if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
+				errors = ERROR;
 				sendheader(commfd, response, 404, 0, NULL);
-				continue;
 			} else if(access(filename, R_OK) == -1) {
 
 				// 403 Forbidden
+				errors = ERROR;
 				sendheader(commfd, response, 403, 0, NULL);
-				continue;
 			} else {
 
 				// get file size
@@ -177,14 +188,13 @@ int main(int argc, char* argv[]) {
 
 				// 200 OK w/ file contents
 				sendheader(commfd, response, 200, filesize, content);
-				continue;
 			}
 		}		
 		
 		// handling PUT request
 		memset(&buf, 0, sizeof(buf));
 		memset(&content, 0, sizeof(content));
-		if(strcmp(type, "PUT") == 0) {
+		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET)) {
 
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
