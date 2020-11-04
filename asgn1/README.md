@@ -1,5 +1,5 @@
 Assignment 1  
-Name: Miranda Eng & Tiffany Phuong  
+Name: Miranda Eng & Shriley Phuong  
 CSE130: Principles of Computer Systems Design  
 November 2, 2020  
 
@@ -16,7 +16,20 @@ Limitations or known issues
 -------------------------------------------------
 
 httpserver.cpp  
-	&ensp;&ensp;&ensp;This program implements a single-threaded HTTP server that responds to GET and PUT commands to read and write files named by 10-characters in ASCII. In response to a GET request from a client, httpserver will detect a file name, read the file contents, write the associated HTTP response header, and, if appropriate, the associated content to stdout on the client side. In response to a PUT request from a client, httpserver will also take data from the request then create or overwrite the client specified file to put into the server directory and write the associated HTTP response header on the client side  
+	&ensp;&ensp;&ensp;This program implements a single-threaded HTTP server that responds
+	&ensp;&ensp;&ensp;to GET and PUT commands to read and write files named by 10-characters
+	&ensp;&ensp;&ensp;in ASCII. In response to a GET request from a client, httpserver will
+	&ensp;&ensp;&ensp;detect a file name, read the file contents, write the associated HTTP
+	&ensp;&ensp;&ensp;response header, and, if appropriate, the associated content to stdout
+	&ensp;&ensp;&ensp;on the client side. In response to a PUT request from a client, httpserver
+	&ensp;&ensp;&ensp;will also take data from the request then create or overwrite the client
+	&ensp;&ensp;&ensp;specified file to put into the server directory and write the associated
+	&ensp;&ensp;&ensp;HTTP response header on the client side  
+
+DESIGN.pdf
+	&ensp;&ensp;&ensp;Describes program functionality, design (data structures, functions,
+	&ensp;&ensp;&ensp;non-trivial algorithms, etc), testing procedures
+	&ensp;&ensp;&ensp;Answers the assignment question 
 
 Makefile  
 	&ensp;&ensp;&ensp;Creates object file and executable for httpserver.cpp  
