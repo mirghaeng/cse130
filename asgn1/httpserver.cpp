@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		// check for other HTTP/1.1 methods
-		if (((strcmp(type, "GET") != 0) || (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR_YET)) {
+		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR_YET)) {
 
 			// 500 Internal Service Error
 			errors = ERROR;
