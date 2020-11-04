@@ -152,10 +152,11 @@ int main(int argc, char* argv[]) {
 		}
 
 		// check for other HTTP/1.1 methods
-        if (((strcmp(type, "OPTIONS") == 0) || (strcmp(type, "HEAD") == 0) || (strcmp(type, "POST") == 0) || (strcmp(type, "DELETE") == 0) || (strcmp(type, "TRACE") == 0) || (strcmp(type, "CONNECT") == 0)) && (errors == NO_ERROR_YET)) {
-            // 500 Internal Service Error
+		if (((strcmp(type, "GET") != 0) || (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR_YET)) {
+
+			// 500 Internal Service Error
 			errors = ERROR;
-            sendheader(commfd, response, 500, 0, NULL);
+			sendheader(commfd, response, 500, 0, NULL);
         }
 	
 		// handling GET request	
