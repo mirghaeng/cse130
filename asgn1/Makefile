@@ -1,10 +1,10 @@
 # Makefile
 
-httpserver: httpserver.o
-	g++ -o httpserver httpserver.o
+httpserver1: httpserver1.o
+	g++ -o httpserver1 httpserver1.o
 
-httpserver.o: httpserver.cpp
-	g++ -c -std=gnu++11 -Wall -Wextra -Wpedantic -Wshadow httpserver.cpp
+httpserver1.o: httpserver1.cpp
+	g++ -c -std=gnu++11 -Wall -Wextra -Wpedantic -Wshadow httpserver1.cpp
 
 clean:
-	rm *.o httpserver
+	rm *.o httpserver1

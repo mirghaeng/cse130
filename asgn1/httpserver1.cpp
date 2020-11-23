@@ -10,8 +10,10 @@
 #include <fcntl.h>
 #include <err.h>
 
+#define SIZE 10000
+
 #define ERROR 1
-#define NO_ERROR_YET 0
+#define NO_ERROR 0
 
 const char* getStatus(int code) {
 	switch(code) {
@@ -42,19 +44,17 @@ unsigned long getaddr(char *name) {
 	return res;
 }
 
-void sendheader(int commfd, char* response, int code, int length, char* content) {
+void sendheader(int commfd, char* response, int code, int length) {
 	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
-	if(content != NULL) {
-		strcat(response, content);
-	}
-	send(commfd, response, strlen(response), 0);
+	int errno = send(commfd, response, strlen(response), 0);
+	if(errno < 0) { warn("send()"); }
 }
 
 int main(int argc, char* argv[]) {
 
 	struct sockaddr_in servaddr;
 	struct stat st;
-	int listenfd, n, port;
+	int listenfd, errno, port;
 	int servaddr_length, commfd;
 	int getfd, filesize;
 	int putfd, contentlength;
@@ -66,7 +66,8 @@ int main(int argc, char* argv[]) {
 		port = atoi(argv[2]);
 	} else {
 		char usage[] = "USAGE: ./httpserver <address> <port-number>\n";
-		write(STDOUT_FILENO, usage, sizeof(char));
+		write(STDOUT_FILENO, usage, sizeof(usage));
+		exit(0);
 	}
 
 	// init socket
@@ -80,22 +81,21 @@ int main(int argc, char* argv[]) {
 	servaddr.sin_port = htons(port);
 
 	// socket bind
-	n = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-	if(n < 0) { err(1, "bind()"); }
+	errno = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
+	if(errno < 0) { err(1, "bind()"); }
 
 	// socket listen
-	n = listen(listenfd, 10);
-	if(n < 0) { err(1, "listen()"); } 
+	errno = listen(listenfd, 10);
+	if(errno < 0) { err(1, "listen()"); } 
 
 	while(1) {
 
-		char buf[100];
-		char header[10000];
-		char headercpy[10000];
-		//char content[10000];        // initialize to size of file
-		char response[10000];       // initialize to size of content + 10000 for the header
+		char buf[SIZE];
+		char header[SIZE];
+		char headercpy[SIZE];
+		char response[SIZE];
 		char *end_of_header, *type, *filename;
-		int errors = NO_ERROR_YET;
+		int errors = NO_ERROR;
 
 		// socket accept
 		char waiting[] = "Waiting for connection...\n";
@@ -129,155 +129,125 @@ int main(int argc, char* argv[]) {
 
 			// 400 Bad Request
 			errors = ERROR;
-			sendheader(commfd, response, 400, 0, NULL);
+			sendheader(commfd, response, 400, 0);
 		}
 		
 		// check filename is alphanumeric
 		for(char* i = filename; *i != '\0'; i++) {
-			if((isalnum(*i) == 0) && (errors == NO_ERROR_YET)) {
+			if((isalnum(*i) == 0) && (errors == NO_ERROR)) {
 
 				// 400 Bad Request
 				errors = ERROR;
-				sendheader(commfd, response, 400, 0, NULL);
+				sendheader(commfd, response, 400, 0);
 			}
 		}
 
 		// check for HTTP/1.1
 		char* ptrhttp = strstr(header, "HTTP/1.1");
-		if((ptrhttp == NULL) && (errors == NO_ERROR_YET)) {
+		if((ptrhttp == NULL) && (errors == NO_ERROR)) {
 
 			// 400 Bad Request
 			errors = ERROR;
-			sendheader(commfd, response, 400, 0, NULL);
+			sendheader(commfd, response, 400, 0);
 		}
 
-		// check for other HTTP/1.1 methods
-		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR_YET)) {
+		// restrict HTTP/1.1 methods to GET & PUT
+		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR)) {
 
 			// 500 Internal Service Error
 			errors = ERROR;
-			sendheader(commfd, response, 500, 0, NULL);
-        }
+			sendheader(commfd, response, 500, 0);
+		}
 
-        //char content[10000];        // initialize to size of file
-		//char response2[10000];       // initialize to size of content + 10000 for the header
-	
 		// handling GET request	
-		memset(&buf, 0, sizeof(buf));
-		//memset(&content, 0, sizeof(content));
-		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
+		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR)) {
 			if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
 				errors = ERROR;
-				sendheader(commfd, response, 404, 0, NULL);
+				sendheader(commfd, response, 404, 0);
 			} else if(access(filename, R_OK) == -1) {
 
 				// 403 Forbidden
 				errors = ERROR;
-				sendheader(commfd, response, 403, 0, NULL);
+				sendheader(commfd, response, 403, 0);
 			} else {
-
+				
 				// get file size
 				stat(filename, &st);
 				filesize = st.st_size;
 
-                char *content;
-                content = new char[filesize];
-                char *responseGet;
-                responseGet = new char[filesize+10000];
+				char *responseGet = new char[SIZE + filesize];
 
-				// get file contents
+				// 200 OK header
+				sendheader(commfd, responseGet, 200, filesize);
+
+				// send file contents
 				getfd = open(filename, O_RDONLY);
-				while(read(getfd, buf, sizeof(char))) {
-					strcat(content, buf);
+				while(read(getfd, buf, sizeof(char)) > 0) {
+					send(commfd, buf, sizeof(char), 0);
 					memset(&buf, 0, sizeof(buf));
 				}
 				close(getfd);
 
-				// 200 OK w/ file contents
-				sendheader(commfd, responseGet, 200, filesize, content);
-                //memset(&content, 0, sizeof(content));
-                //memset(&responseGet, 0, sizeof(responseGet));
-                delete[] content;
-                delete[] responseGet;
+				delete[] responseGet;
 			}
 		}		
 		
 		// handling PUT request
-		memset(&buf, 0, sizeof(buf));
-		//memset(&content, 0, sizeof(content));
-		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET)) {
+		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR)) {
             
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
+
+			// create / overwrite new file in directory
+			putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
 			if(ptrlength != NULL) {
 
 				// get content if Content-Length is provided
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
-				char *content;
-            	content = new char[contentlength];
-            	char *responsePut;
-            	responsePut = new char[contentlength+10000];
+				
+				char *responsePut = new char[SIZE + contentlength];
 
-				for(int i = contentlength; i > 0; i--) {
-					n = recv(commfd, buf, sizeof(char), 0);
-					if(n < 0) { warn("recv()"); }
-					if(n == 0) { break; }
-					write(STDOUT_FILENO, buf, sizeof(char));
-					strcat(content, buf);
-					memset(&buf, 0, sizeof(buf));
+				// 201 Created header
+				sendheader(commfd, responsePut, 201, contentlength);
+
+				// put specified length of contents into file
+				for(int i = 0; i < contentlength; i++) {
+					errno = recv(commfd, buf, sizeof(char), 0);
+					if(errno < 0) { err(1, "recv()"); }
+					if(errno == 0) { break; }
+					write(putfd, buf, sizeof(char));
+					memset(&buf, 0, sizeof(char));
 				}
 
-				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-				write(putfd, content, strlen(content));
-				close(putfd);
-
-				sendheader(commfd, responsePut, 201, 0, NULL);
-				delete[] content;
 				delete[] responsePut;
-
 			} else {
+			
+				// put content into file and get Content-Length
+				contentlength = recv(commfd, buf, sizeof(buf), 0);
+				if(contentlength < 0) { err(1, "recv()"); }
+				write(putfd, buf, contentlength);
+
+				char *responsePut = new char[SIZE + contentlength];
 				
-				// // get content if Content-Length is not provided
-				// while(recv(commfd, buf, sizeof(char), 0) > 0) {
-				// 	write(STDOUT_FILENO, buf, sizeof(char));
-				// 	strcat(content, buf);
-				// 	memset(&buf, 0, sizeof(buf));
-				// }
+				// 201 Created header
+				sendheader(commfd, responsePut, 201, contentlength);
 
-                char *content;
-            	content = new char[10000];
-                char *responsePut;
-            	responsePut = new char[contentlength+10000];
-                while (recv(commfd, buf, sizeof(char), 0) > 0) {
-                    write(STDOUT_FILENO, buf, sizeof(char));
-                    strcat(content, buf);
-                    memset(&buf, 0, sizeof(buf));
-                }
-
-
+				delete[] responsePut;
 			}
-
-			// create/overwrite new file in directory
-			// putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-			// write(putfd, content, strlen(content));
-			// close(putfd);
-
-			// 201 Created
-			// sendheader(commfd, responsePut, 201, 0, NULL);
-			// delete[] content;
-			// delete[] responsePut;
+			close(putfd);
 		}
 
 		// clear buffers
+		memset(&buf, 0, sizeof(buf));
 		memset(&header, 0, sizeof(header));
 		memset(&headercpy, 0, sizeof(headercpy));
-		//memset(&content, 0, sizeof(content));
 		memset(&response, 0, sizeof(response));
 		
 		// close TCP connection
 		close(commfd);
 	}
 }
+
