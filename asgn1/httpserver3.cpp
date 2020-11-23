@@ -13,8 +13,6 @@
 #define ERROR 1
 #define NO_ERROR_YET 0
 
-// Taking in integer code # and returns corresponding
-// status string
 const char* getStatus(int code) {
 	switch(code) {
 		case 200: return "OK";
@@ -27,12 +25,6 @@ const char* getStatus(int code) {
 	return NULL;
 }
 
-/*
- * Provided by TA
- * getaddr returns the numerical representation of the address
- * identified by *name* as required for an IPv4 address represented
- * in a struct sockaddr_in.
- */
 unsigned long getaddr(char *name) {
 	unsigned long res;
 	struct addrinfo hints;
@@ -50,13 +42,10 @@ unsigned long getaddr(char *name) {
 	return res;
 }
 
-// formats HTTP response and sends to client
-void sendheader(int commfd, char* response, int code, int length, char* content) {
-	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
-	if(content != NULL) {
-		strcat(response, content);
-	}
-	send(commfd, response, strlen(response), 0);
+void sendheader(int commfd, char* response, int code, int length) {
+	sprintf(response, "\nHTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
+	int errno = send(commfd, response, strlen(response), 0);
+	if (errno < 0) { warn("send()"); }
 }
 
 int main(int argc, char* argv[]) {
@@ -101,13 +90,12 @@ int main(int argc, char* argv[]) {
 		char buf[100];
 		char header[10000];
 		char headercpy[10000];
-		char content[10000];
-		char response[10000];
+		char response[10000];       // initialize to size of content + 10000 for the header
 		char *end_of_header, *type, *filename;
 		int errors = NO_ERROR_YET;
 
 		// socket accept
-		char waiting[] = "Waiting for connection...\n";
+		char waiting[] = "\nWaiting for connection...\n";
 		write(STDOUT_FILENO, waiting, strlen(waiting));
 		servaddr_length = sizeof(servaddr);
 		commfd = accept(listenfd, (struct sockaddr*)&servaddr, (socklen_t*)&servaddr_length);
@@ -138,7 +126,7 @@ int main(int argc, char* argv[]) {
 
 			// 400 Bad Request
 			errors = ERROR;
-			sendheader(commfd, response, 400, 0, NULL);
+			sendheader(commfd, response, 400, 0);
 		}
 		
 		// check filename is alphanumeric
@@ -147,7 +135,7 @@ int main(int argc, char* argv[]) {
 
 				// 400 Bad Request
 				errors = ERROR;
-				sendheader(commfd, response, 400, 0, NULL);
+				sendheader(commfd, response, 400, 0);
 			}
 		}
 
@@ -157,7 +145,7 @@ int main(int argc, char* argv[]) {
 
 			// 400 Bad Request
 			errors = ERROR;
-			sendheader(commfd, response, 400, 0, NULL);
+			sendheader(commfd, response, 400, 0);
 		}
 
 		// check for other HTTP/1.1 methods
@@ -165,105 +153,104 @@ int main(int argc, char* argv[]) {
 
 			// 500 Internal Service Error
 			errors = ERROR;
-			sendheader(commfd, response, 500, 0, NULL);
+			sendheader(commfd, response, 500, 0);
         }
 	
 		// handling GET request	
 		memset(&buf, 0, sizeof(buf));
-		memset(&content, 0, sizeof(content));
 		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
 			if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
 				errors = ERROR;
-				sendheader(commfd, response, 404, 0, NULL);
+				sendheader(commfd, response, 404, 0);
 			} else if(access(filename, R_OK) == -1) {
 
 				// 403 Forbidden
 				errors = ERROR;
-				sendheader(commfd, response, 403, 0, NULL);
+				sendheader(commfd, response, 403, 0);
 			} else {
 
 				// get file size
 				stat(filename, &st);
 				filesize = st.st_size;
 
+                char *responseGet;
+                responseGet = new char[filesize+10000];
+
+				sendheader(commfd, responseGet, 200, filesize);
+
 				// get file contents
 				getfd = open(filename, O_RDONLY);
 				while(read(getfd, buf, sizeof(char))) {
-					strcat(content, buf);
+					send(commfd, buf, sizeof(char), 0);
 					memset(&buf, 0, sizeof(buf));
 				}
 				close(getfd);
 
-				// 200 OK w/ file contents
-				sendheader(commfd, response, 200, filesize, content);
+                delete[] responseGet;
 			}
 		}		
 		
 		// handling PUT request
 		memset(&buf, 0, sizeof(buf));
-		memset(&content, 0, sizeof(content));
 		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET)) {
-
+            
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
+
 			if(ptrlength != NULL) {
 
-				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC | O_SYNC | O_DSYNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-
 				// get content if Content-Length is provided
-				int plusaddr = 0;
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
-				printf("Content Length: %d\n", contentlength);
+
+            	char *responsePut = new char[contentlength+10000];
+
+				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
 				for(int i = contentlength; i > 0; i--) {
-					n = read(commfd, buf, sizeof(char));
+					n = recv(commfd, buf, sizeof(char), 0);
 					if(n < 0) { warn("recv()"); }
 					if(n == 0) { break; }
 					write(STDOUT_FILENO, buf, sizeof(char));
-					//memcpy(content+plusaddr, buf, n);
 					write(putfd, buf, sizeof(char));
 					memset(&buf, 0, sizeof(buf));
-					plusaddr += n;
 				}
-				printf("end\n");
-				//printf("Content: %s", content);
-				// int cLength = 0;
-				// int received = sizeof(buf);
-				// while(received == sizeof(buf)) {
-				// 	received = recv(commfd, buf, sizeof(buf), 0);
-				// 	write(STDOUT_FILENO, buf, sizeof(buf));
-				// 	strcat(content, buf);
-				// 	memset(&buf, 0, sizeof(buf));
-				// 	cLength++;
-				// }
-				//printf("\nContent: \n%send", content);
+
+				close(putfd);
+
+				sendheader(commfd, responsePut, 201, 0);
+				delete[] responsePut;
 
 			} else {
 				
-				// get content if Content-Length is not provided
-				while(recv(commfd, buf, sizeof(char), 0) > 0) {
+				// // get content if Content-Length is not provided
+
+                char *responsePut = new char[20000];
+
+				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				sendheader(commfd, responsePut, 201, 0);
+
+				while (1) {
+					int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					if (amtRcv == 0) {
+						break;
+					}
 					write(STDOUT_FILENO, buf, sizeof(char));
-					strcat(content, buf);
+					write(putfd, buf, sizeof(char));
 					memset(&buf, 0, sizeof(buf));
 				}
+
+				close(putfd);
+
+				delete[] responsePut;
+
 			}
-
-			// create/overwrite new file in directory
-			//putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC | O_SYNC | O_DSYNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-			//int numwr = write(putfd, content, strlen(content));
-			//write(STDOUT_FILENO, content, strlen(content));
-			//printf("Amount written: %d\nContent string length: %lu\n", numwr, strlen(content));
-			close(putfd);
-
-			// 201 Created
-			sendheader(commfd, response, 201, 0, NULL);
 		}
 
 		// clear buffers
 		memset(&header, 0, sizeof(header));
 		memset(&headercpy, 0, sizeof(headercpy));
-		memset(&content, 0, sizeof(content));
 		memset(&response, 0, sizeof(response));
 		
 		// close TCP connection

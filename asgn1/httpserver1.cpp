@@ -246,6 +246,18 @@ int main(int argc, char* argv[]) {
 				// 	strcat(content, buf);
 				// 	memset(&buf, 0, sizeof(buf));
 				// }
+
+                char *content;
+            	content = new char[10000];
+                char *responsePut;
+            	responsePut = new char[contentlength+10000];
+                while (recv(commfd, buf, sizeof(char), 0) > 0) {
+                    write(STDOUT_FILENO, buf, sizeof(char));
+                    strcat(content, buf);
+                    memset(&buf, 0, sizeof(buf));
+                }
+
+
 			}
 
 			// create/overwrite new file in directory
