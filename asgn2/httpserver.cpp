@@ -10,7 +10,6 @@
 #include <fcntl.h>
 #include <err.h>
 
-#define QUEUE_SIZE 10
 #define SIZE 10000
 
 #define ERROR 1
@@ -24,6 +23,7 @@ struct session {
 
 vector<session> sessions;
 pthread_mutex_t sessions_mutex;
+pthread_mutex_t files_mutex;
 pthread_cond_t prod_cond, cons_cond;
 
 const char* getStatus(int code) {
@@ -63,27 +63,26 @@ void sendheader(int commfd, char* response, int code, int length) {
 
 void* dispatcher(void* arg) {
 	session* client = (session*)arg;
-	int listenfd = client->sockfd;
+	int sockfd = client->sockfd;
 
 	while(1) {
 		// socket accept
 		char waiting[] = "Waiting for connection...\n";
 		write(STDOUT_FILENO, waiting, strlen(waiting));
 		servaddr_length = sizeof(client->servaddr);
-		client->commfd = accept(listenfd, (struct sockaddr*)&(client->servaddr), (socklen_t*)&servaddr_length);
+		client->commfd = accept(sockfd, (struct sockaddr*)&(client->servaddr), (socklen_t*)&servaddr_length);
 		if(client->commfd < 0) {
 			warn("accept()");
 			continue;
 		}
 		
 		pthread_mutex_lock(&sessions_mutex);
-
-		// if queue is full, wait
-		if(sessions.size() == 4) {
+		sessions.push_back(client);
+		if(sessions.size() >= 4) {
+			// if queue is full, wait
 			pthread_cond_wait(&(client->prod_cond), &sessions_mutex);
 		}
-
-		// tell waiting consumers they can now consume
+		// tell waiting consumers they can now work
 		pthread_cond_signal(&client->cons_cond);
 		pthread_mutex_unlock(&sessions_mutex);
 	}
@@ -106,7 +105,7 @@ void* worker(void* arg) {
 			// wait if buffer is empty
 			pthread_cond_wait(&client->cons_cond, &sessions_mutex);
 		}
-
+		// tell waiting producers they can now dispatch
 		pthread_cond_signal(&client->prod_cond);
 		pthread_mutex_unlock(&sessions_mutex);
 
@@ -253,10 +252,10 @@ void* worker(void* arg) {
 	// close TCP connection
 	close(commfd);
 
-	// delete structure instance
+	// remove client from queue
 	pthread_mutex_lock(&sessions_mutex);
 	for(int i = 0; i < sessions.size(); i++) {
-		if(sessions[i]->sockfd == client->sockfd) {
+		if(sessions[i]->commfd == client->commfd) {
 			sessions.erase(sessions.begin() + i);
 			break;
 		}
@@ -315,16 +314,17 @@ int main(int argc, char* argv[]) {
 	if(errno < 0) { err(1, "listen()"); }
 
 	pthread_mutex_init(&sessions_mutex, 0);
+	pthread_mutex_init(&files_mutex, 0);
 
-	pthread_create(&(client->tid), 0, dispatcher, client);
+	pthread_create(&(client->tid), 0, dispatcher, (void*)&client);
 
-	pthread_t worker_tid[QUEUE_SIZE];
+	pthread_t worker_tid[numthreads];
 	for(int i = 0; i < numthreads; i++) {
-		pthread_create(&worker_tid[i], 0, worker, client);
+		pthread_create(&worker_tid[i], 0, worker, (void*)&client);
 	}
 
 	sleep(10);
-	pthread_mutex_destroy(&(client->prod_cond));
+	pthread_mutex_destroy(&sessions_mutex);
 	pthread_cond_destroy(&(client->prod_cond));
 	pthread_cond_destroy(&(client->cons_cond));
 
