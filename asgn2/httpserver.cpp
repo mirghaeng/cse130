@@ -136,7 +136,7 @@ void* worker(void* arg) {
 			if(end_of_header != NULL) { break; }
 			memset(&buf, 0, sizeof(buf));
 		}
-		
+
 		// get request type
 		strcpy(headercpy, header);
 		type = strtok(headercpy, " ");
@@ -265,22 +265,20 @@ void* worker(void* arg) {
 
 		// close TCP connection
 		close(ses->commfd);
+
+		// clear buffers
+		memset(&buf, 0, sizeof(buf));
+		memset(&header, 0, sizeof(header));
+		memset(&headercpy, 0, sizeof(headercpy));
+		memset(&response, 0, sizeof(response));
+
+		// remove client from queue
+		pthread_mutex_lock(&(client->sessions_mutex));
+		// tell waiting producers they can now dispatch
+		pthread_cond_signal(&(client->dispatcher_cond));
+		pthread_mutex_unlock(&(client->sessions_mutex));
+		delete client;
 	}
-
-	// clear buffers
-	memset(&buf, 0, sizeof(buf));
-	memset(&header, 0, sizeof(header));
-	memset(&headercpy, 0, sizeof(headercpy));
-	memset(&response, 0, sizeof(response));
-
-	// remove client from queue
-	pthread_mutex_lock(&(client->sessions_mutex));
-	// tell waiting producers they can now dispatch
-	pthread_cond_signal(&(client->dispatcher_cond));
-	pthread_mutex_unlock(&(client->sessions_mutex));
-	delete client;
-
-	return(0);
 }
 
 int main(int argc, char* argv[]) {
