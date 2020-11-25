@@ -27,6 +27,7 @@ struct file {
 };
 
 struct shared_data {
+	int numthreads;
 	int sockfd;
 	struct sockaddr_in servaddr;
 	std::queue<session*> sessions;
@@ -77,7 +78,7 @@ void* dispatcher(void* arg) {
 	while(1) {
 
 		pthread_mutex_lock(&(client->sessions_mutex));
-		while(client->sessions.size() >= 4) {
+		while((int)client->sessions.size() >= client->numthreads) {
 			// if queue is full, wait
 			pthread_cond_wait(&(client->dispatcher_cond), &(client->sessions_mutex));
 		}
@@ -125,11 +126,13 @@ void* worker(void* arg) {
 			pthread_cond_wait(&(client->worker_cond), &(client->sessions_mutex));
 		}
 		session* ses = client->sessions.front();
+		int commfd = ses->commfd;
 		client->sessions.pop();
+		delete ses;
 		pthread_mutex_unlock(&(client->sessions_mutex));
 
 		// socket read request
-		while(recv(ses->commfd, buf, sizeof(char), 0) > 0) {
+		while(recv(commfd, buf, sizeof(char), 0) > 0) {
 			write(STDOUT_FILENO, buf, sizeof(char));
 			strcat(header, buf);
 			end_of_header = strstr(header, "\r\n\r\n");
@@ -145,12 +148,16 @@ void* worker(void* arg) {
 		filename = strtok(NULL, " ");
 		filename++;
 		
+		printf("%s\n", filename);
+		int l = strlen(filename);
+		printf("%d\n", l);
+
 		// check filename length
 		if(strlen(filename) != 10) {
 
 			// 400 Bad Request
 			errors = ERROR;
-			sendheader(ses->commfd, response, 400, 0);
+			sendheader(commfd, response, 400, 0);
 		}
 		
 		// check filename is alphanumeric
@@ -159,7 +166,7 @@ void* worker(void* arg) {
 
 				// 400 Bad Request
 				errors = ERROR;
-				sendheader(ses->commfd, response, 400, 0);
+				sendheader(commfd, response, 400, 0);
 			}
 		}
 
@@ -169,7 +176,7 @@ void* worker(void* arg) {
 
 			// 400 Bad Request
 			errors = ERROR;
-			sendheader(ses->commfd, response, 400, 0);
+			sendheader(commfd, response, 400, 0);
 		}
 
 		// restrict HTTP/1.1 methods to GET & PUT
@@ -177,7 +184,7 @@ void* worker(void* arg) {
 
 			// 500 Internal Service Error
 			errors = ERROR;
-			sendheader(ses->commfd, response, 500, 0);
+			sendheader(commfd, response, 500, 0);
 		}
 
 		// handling GET request	
@@ -186,12 +193,12 @@ void* worker(void* arg) {
 
 				// 404 File Not Found
 				errors = ERROR;
-				sendheader(ses->commfd, response, 404, 0);
+				sendheader(commfd, response, 404, 0);
 			} else if(access(filename, R_OK) == -1) {
 
 				// 403 Forbidden
 				errors = ERROR;
-				sendheader(ses->commfd, response, 403, 0);
+				sendheader(commfd, response, 403, 0);
 			} else {
 				
 				// get file size
@@ -201,12 +208,12 @@ void* worker(void* arg) {
 				char *responseGet = new char[SIZE + filesize];
 
 				// 200 OK header
-				sendheader(ses->commfd, responseGet, 200, filesize);
+				sendheader(commfd, responseGet, 200, filesize);
 
 				// send file contents
 				getfd = open(filename, O_RDONLY);
 				while(read(getfd, buf, sizeof(char)) > 0) {
-					send(ses->commfd, buf, sizeof(char), 0);
+					send(commfd, buf, sizeof(char), 0);
 					memset(&buf, 0, sizeof(buf));
 				}
 				close(getfd);
@@ -232,11 +239,11 @@ void* worker(void* arg) {
 				char *responsePut = new char[SIZE + contentlength];
 
 				// 201 Created header
-				sendheader(ses->commfd, responsePut, 201, contentlength);
+				sendheader(commfd, responsePut, 201, contentlength);
 
 				// put specified length of contents into file
 				for(int i = 0; i < contentlength; i++) {
-					errno = recv(ses->commfd, buf, sizeof(char), 0);
+					errno = recv(commfd, buf, sizeof(char), 0);
 					if(errno < 0) { err(1, "recv()"); }
 					if(errno == 0) { break; }
 					write(putfd, buf, sizeof(char));
@@ -254,7 +261,7 @@ void* worker(void* arg) {
 				char *responsePut = new char[SIZE + contentlength];
 				
 				// 201 Created header
-				sendheader(ses->commfd, responsePut, 201, contentlength);
+				sendheader(commfd, responsePut, 201, contentlength);
 
 				delete[] responsePut;
 			}
@@ -272,12 +279,8 @@ void* worker(void* arg) {
 		memset(&headercpy, 0, sizeof(headercpy));
 		memset(&response, 0, sizeof(response));
 
-		// remove client from queue
-		pthread_mutex_lock(&(client->sessions_mutex));
 		// tell waiting producers they can now dispatch
 		pthread_cond_signal(&(client->dispatcher_cond));
-		pthread_mutex_unlock(&(client->sessions_mutex));
-		delete client;
 	}
 }
 
@@ -285,9 +288,9 @@ int main(int argc, char* argv[]) {
 
 	struct sockaddr_in servaddr;
 	int opt;
-	int numthreads = 4; // default
 	int errno, port;
 	shared_data *client = new shared_data;
+	client->numthreads = 4; //default
 	//int redundancy;
 
 	// check cmd arg # & get port
@@ -304,7 +307,7 @@ int main(int argc, char* argv[]) {
     while((opt = getopt(argc, argv, "N:r")) != -1) {
         switch (opt) {
             case 'N':
-                numthreads = atoi(optarg);
+                client->numthreads = atoi(optarg);
                 break;
             case 'r':
                 //redundancy = 1;
@@ -338,7 +341,7 @@ int main(int argc, char* argv[]) {
 	pthread_t dispatcher_tid[1];
 	pthread_t worker_tid[SIZE];
 	pthread_create(&dispatcher_tid[0], 0, dispatcher, (void*)&client);
-	for(int i = 0; i < numthreads; i++) {
+	for(int i = 0; i < client->numthreads; i++) {
 		pthread_create(&worker_tid[i], 0, worker, (void*)&client);
 	}
 
