@@ -154,12 +154,13 @@ void* worker(void* data) {
 			sendheader(commfd, response, 500, 0);
         }
 
-        // get file mutex
+        // get file mutex and if the filename doesn't match the pointer isn't set till later
         struct file_data* filepointer;
         int vectornum = 0;
         for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
             if ((strcmp(filename, i->filename)) == 0) {
                 filepointer = (struct file_data*) &shared->fdata[vectornum];
+                break;
             }
             vectornum++;
         }
@@ -213,57 +214,119 @@ void* worker(void* data) {
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
 
-			if(ptrlength != NULL) {
+			if(ptrlength != NULL) {     // content length provided
 
 				// get content if Content-Length is provided
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
 
             	char *responsePut = new char[500];
 
-                pthread_mutex_lock(&filepointer->file_mutex);
+                if(access(filename, F_OK) == -1) {          // content length provided and file doesn't exist
 
-				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+                    pthread_mutex_lock(&shared->global_mutex);
+                    struct file_data file_data;
+                    file_data.filename = filename;
+                    pthread_mutex_init(&file_data.file_mutex, NULL);
+                    shared->fdata.push_back(file_data);
+                    filepointer = (struct file_data*) &shared->fdata.back();
+                    pthread_mutex_lock(&filepointer->file_mutex);
 
-				for(int i = contentlength; i > 0; i--) {
-					n = recv(commfd, buf, sizeof(char), 0);
-					if(n < 0) { warn("recv()"); }
-					if(n == 0) { break; }
-					write(STDOUT_FILENO, buf, sizeof(char));
-					write(putfd, buf, sizeof(char));
-					memset(&buf, 0, sizeof(buf));
-				}
+                    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
-				close(putfd);
-				sendheader(commfd, responsePut, 201, 0);
-                pthread_mutex_unlock(&filepointer->file_mutex);
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
 
-				delete[] responsePut;
+				    close(putfd);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
 
-			} else {
-				
-				// get content if Content-Length is not provided
+				    delete[] responsePut;
+                }
+                else {      // content length provided and file exists already
+
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfd);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+
+				    delete[] responsePut;
+                }
+
+			} else {        // content length isn't provided
 
                 char *responsePut = new char[20000];
+                if (access(filename, F_OK) == -1) {         // no content length and file doesn't exist
 
-                pthread_mutex_lock(&filepointer->file_mutex);
-				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-				sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_lock(&shared->global_mutex);
+                    struct file_data file_data;
+                    file_data.filename = filename;
+                    pthread_mutex_init(&file_data.file_mutex, NULL);
+                    shared->fdata.push_back(file_data);
+                    filepointer = (struct file_data*) &shared->fdata.back();
+                    pthread_mutex_lock(&filepointer->file_mutex);
 
-				while (1) {
-					int amtRcv = recv(commfd, buf, sizeof(char), 0);
-					if (amtRcv == 0) {
-						break;
-					}
-					write(STDOUT_FILENO, buf, sizeof(char));
-					write(putfd, buf, sizeof(char));
-					memset(&buf, 0, sizeof(buf));
-				}
 
-				close(putfd);
+				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				    sendheader(commfd, responsePut, 201, 0);
 
-                pthread_mutex_unlock(&filepointer->file_mutex);
+				    while (1) {
+					    int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					    if (amtRcv == 0) {
+						    break;
+					    }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
 
-				delete[] responsePut;
+				    close(putfd);
+
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
+
+				    delete[] responsePut;
+                }
+                else {              // no content length and file exists already
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+
+				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				    sendheader(commfd, responsePut, 201, 0);
+
+				    while (1) {
+					    int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					    if (amtRcv == 0) {
+						    break;
+					    }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfd);
+
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    delete[] responsePut;
+                }
 
 			}
 		}
