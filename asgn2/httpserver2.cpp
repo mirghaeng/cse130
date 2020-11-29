@@ -35,6 +35,7 @@ struct shared_data {
     int rflag;
     int sockfd;
     int numthreads;
+    int currentrequests;
     struct sockaddr_in servaddr;
     std::vector<file_data> fdata;
     std::queue<sessions> session_queue;
@@ -75,58 +76,30 @@ void sendheader(int commfd, char* response, int code, int length) {
 	if (errno < 0) { warn("send()"); }
 }
 
-void* dispatcher(void* data) {
-    // struct
-    struct shared_data* shared = (struct shared_data*) data;
-    int sockfd = shared->sockfd;
-
-    while (1) {
-
-        pthread_mutex_lock(&shared->global_mutex);
-        while ((int)shared->session_queue.size() >= shared->numthreads) {
-            pthread_cond_wait(&shared->dispatcher_cond, &shared->global_mutex);
-        }
-        pthread_mutex_unlock(&shared->global_mutex);
-
-        char waiting[] = "\nWaiting for connection...\n";
-		write(STDOUT_FILENO, waiting, strlen(waiting));
-		int servaddr_length = sizeof(shared->servaddr);
-		int commfd = accept(sockfd, (struct sockaddr*)&(shared->servaddr), (socklen_t*)&servaddr_length);
-		if(commfd < 0) {
-			warn("accept()");
-			continue;
-		}
-
-        pthread_mutex_lock(&shared->global_mutex);
-        struct sessions request;
-        request.commfd = commfd;
-        shared->session_queue.push(request);
-        pthread_cond_signal(&shared->worker_cond);
-        pthread_mutex_unlock(&shared->global_mutex);
-    }
-}
-
 void* worker(void* data) {
     // struct
     struct shared_data* shared = (struct shared_data*) data;
     struct stat st;
+    //int commfd;
 
     while(1) {
+
+        int commfd = 0;
 
         // lock global mutex to get data
         pthread_mutex_lock(&shared->global_mutex);
         while (shared->session_queue.empty()) {
             pthread_cond_wait(&shared->worker_cond, &shared->global_mutex);
         }
-        int commfd =  shared->session_queue.front().commfd;
+        commfd = shared->session_queue.front().commfd;
         shared->session_queue.pop();
-        pthread_cond_signal(&shared->dispatcher_cond);
+        //pthread_cond_signal(&shared->dispatcher_cond);
         pthread_mutex_unlock(&shared->global_mutex);
 
         char buf[100];
 		char header[5000];
 		char headercpy[5000];
-		char response[10000];       // initialize to size of content + 10000 for the header
+		char response[500];       // initialize to size of content + 10000 for the header
 		char *end_of_header, *type, *filename;
 		int errors = NO_ERROR_YET;
         int contentlength, filesize;
@@ -181,6 +154,16 @@ void* worker(void* data) {
 			sendheader(commfd, response, 500, 0);
         }
 
+        // get file mutex
+        struct file_data* filepointer;
+        int vectornum = 0;
+        for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
+            if ((strcmp(filename, i->filename)) == 0) {
+                filepointer = (struct file_data*) &shared->fdata[vectornum];
+            }
+            vectornum++;
+        }
+
         // handling GET request
         int getfd;	
 		memset(&buf, 0, sizeof(buf));
@@ -202,7 +185,9 @@ void* worker(void* data) {
 				filesize = st.st_size;
 
                 char *responseGet;
-                responseGet = new char[filesize+10000];
+                responseGet = new char[500];
+
+                pthread_mutex_lock(&filepointer->file_mutex);
 
 				sendheader(commfd, responseGet, 200, filesize);
 
@@ -212,7 +197,9 @@ void* worker(void* data) {
 					send(commfd, buf, sizeof(char), 0);
 					memset(&buf, 0, sizeof(buf));
 				}
+
 				close(getfd);
+                pthread_mutex_unlock(&filepointer->file_mutex);
 
                 delete[] responseGet;
 			}
@@ -231,7 +218,9 @@ void* worker(void* data) {
 				// get content if Content-Length is provided
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
 
-            	char *responsePut = new char[contentlength+10000];
+            	char *responsePut = new char[500];
+
+                pthread_mutex_lock(&filepointer->file_mutex);
 
 				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
@@ -245,16 +234,18 @@ void* worker(void* data) {
 				}
 
 				close(putfd);
-
 				sendheader(commfd, responsePut, 201, 0);
+                pthread_mutex_unlock(&filepointer->file_mutex);
+
 				delete[] responsePut;
 
 			} else {
 				
-				// // get content if Content-Length is not provided
+				// get content if Content-Length is not provided
 
                 char *responsePut = new char[20000];
 
+                pthread_mutex_lock(&filepointer->file_mutex);
 				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 				sendheader(commfd, responsePut, 201, 0);
 
@@ -270,6 +261,8 @@ void* worker(void* data) {
 
 				close(putfd);
 
+                pthread_mutex_unlock(&filepointer->file_mutex);
+
 				delete[] responsePut;
 
 			}
@@ -280,8 +273,13 @@ void* worker(void* data) {
 		memset(&headercpy, 0, sizeof(headercpy));
 		memset(&response, 0, sizeof(response));
 		
-		// close TCP connection
-		close(commfd);
+        close(commfd);
+
+        pthread_mutex_lock(&shared->global_mutex);
+        shared->currentrequests--;
+        pthread_cond_signal(&shared->dispatcher_cond);
+        pthread_mutex_unlock(&shared->global_mutex);
+
     }
 }
 
@@ -296,11 +294,9 @@ int main(int argc, char* argv[]) {
         switch (opt) {
             case 'N':
                 num_workers = atoi(optarg);
-                //printf("Option: %c\nNumber of threads: %d\n", opt, num_workers);
                 break;
             case 'r':
                 redundancy = 1;
-                //printf("Option: %c\n", opt);
                 break;
         }
     }
@@ -323,9 +319,6 @@ int main(int argc, char* argv[]) {
     }
     servaddr.sin_port = htons(port);
 
-    // testing
-    //printf("The address is: %s\nThe port is: %d\nThreads: %d\n", argv[optind], port, num_workers);
-
     // socket bind
     n = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
     if (n < 0) { err(1, "bind()"); }
@@ -342,6 +335,7 @@ int main(int argc, char* argv[]) {
     common_data.rflag = redundancy;
     common_data.sockfd = listenfd;
     common_data.numthreads = num_workers;
+    common_data.currentrequests = 0;
     common_data.servaddr = servaddr;
 
     // go through each file in directory and make a lock
@@ -355,7 +349,6 @@ int main(int argc, char* argv[]) {
         }
         else {
             char* file_name = dp->d_name;
-            //printf("File: %s\n", file_name);
 
             struct file_data filedata;
             filedata.filename = file_name;
@@ -364,19 +357,43 @@ int main(int argc, char* argv[]) {
         }
 
     }
-    printf("# of files: %lu\n", common_data.fdata.size());
 
     // create pthreads
-    pthread_t dispatch_tid[SIZE], worker_tid[SIZE];
+    pthread_t worker_tid[SIZE];
 
-    pthread_create(&dispatch_tid[0], NULL, &dispatcher, &common_data);
     for (int i = 0; i < num_workers; ++i) {
         pthread_create(&worker_tid[i], NULL, &worker, &common_data);
     }
 
-    sleep(10);
-    pthread_mutex_destroy(&common_data.global_mutex);
-    pthread_cond_destroy(&common_data.dispatcher_cond);
-    pthread_cond_destroy(&common_data.worker_cond);
-    return 0;
+    // dispatcher thread
+    struct shared_data* shared = (struct shared_data*) &common_data;
+    int sockfd = shared->sockfd;
+
+    while (1) {
+
+        pthread_mutex_lock(&shared->global_mutex);
+        while (shared->currentrequests >= shared->numthreads) {
+            pthread_cond_wait(&shared->dispatcher_cond, &shared->global_mutex);
+        }
+        pthread_mutex_unlock(&shared->global_mutex);
+
+        char waiting[] = "\nWaiting for connection...\n";
+		write(STDOUT_FILENO, waiting, strlen(waiting));
+		int servaddr_length = sizeof(shared->servaddr);
+		int commfd = accept(sockfd, (struct sockaddr*)&(shared->servaddr), (socklen_t*)&servaddr_length);
+		if(commfd < 0) {
+			warn("accept()");
+			continue;
+		}
+
+        pthread_mutex_lock(&shared->global_mutex);
+        struct sessions request;
+        request.commfd = commfd;
+        shared->session_queue.push(request);
+        shared->currentrequests++;
+
+        pthread_cond_signal(&shared->worker_cond);
+        pthread_mutex_unlock(&shared->global_mutex);
+    }
+
 }
