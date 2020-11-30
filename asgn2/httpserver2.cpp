@@ -36,6 +36,7 @@ struct shared_data {
     int sockfd;
     int numthreads;
     int currentrequests;
+	int fileexists;
     struct sockaddr_in servaddr;
     std::vector<file_data> fdata;
     std::queue<sessions> session_queue;
@@ -153,19 +154,48 @@ void* worker(void* data) {
 			sendheader(commfd, response, 500, 0);
         }
 
+
+		struct file_data* filepointer;
+		//int fileexists = 0;
+		shared->fileexists = 0;
+		int vectornum = 0;
+		//pthread_mutex_lock(&shared->global_mutex);
+		// find the file in the vector
+        for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
+            if ((strcmp(filename, i->filename)) == 0) {
+                filepointer = (struct file_data*) &shared->fdata[vectornum];
+				shared->fileexists = 1;
+            	break;
+            }
+            vectornum++;
+        }
+		pthread_mutex_lock(&shared->global_mutex);
+		// if the file doesnt exist, create one and add it to the vector
+		if (strcmp(type, "PUT") && (shared->fileexists == 0)) {
+
+            struct file_data file_data;
+			strcpy(file_data.filename, filename);
+            pthread_mutex_init(&file_data.file_mutex, NULL);
+            shared->fdata.push_back(file_data);
+
+            filepointer = (struct file_data*) &shared->fdata.back();
+			shared->fileexists = 1;
+		}
+		printf("file is %s\n", filepointer->filename);
+		pthread_mutex_unlock(&shared->global_mutex);
         /********************************************************** GET WITHOUT REDUNDANCY **********************************************************/
         int getfd;	
 		memset(&buf, 0, sizeof(buf));
 		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
-			struct file_data* filepointer;
-        	int vectornum = 0;
-        	for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
-            	if ((strcmp(filename, i->filename)) == 0) {
-                	filepointer = (struct file_data*) &shared->fdata[vectornum];
-                	break;
-            	}
-            	vectornum++;
-        	}
+			// struct file_data* filepointer;
+        	// int vectornum = 0;
+        	// for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
+            // 	if ((strcmp(filename, i->filename)) == 0) {
+            //     	filepointer = (struct file_data*) &shared->fdata[vectornum];
+            //     	break;
+            // 	}
+            // 	vectornum++;
+        	// }
 
 			if(access(filename, F_OK) == -1) {
 
@@ -214,7 +244,7 @@ void* worker(void* data) {
             
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
-			struct file_data* filepointer;
+			//struct file_data* filepointer;
 
 			if(ptrlength != NULL) {     // content length provided
 
@@ -223,7 +253,7 @@ void* worker(void* data) {
 
             	char *responsePut = new char[500];
 
-                if(access(filename, F_OK) == -1) {          // content length provided and file doesn't exist
+                if(shared->fileexists == 0) {          // content length provided and file doesn't exist
 
                     pthread_mutex_lock(&shared->global_mutex);
 
@@ -255,15 +285,6 @@ void* worker(void* data) {
                 }
                 else {      // content length provided and file exists already
 
-					int vectornum = 0;
-        			for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
-            			if ((strcmp(filename, i->filename)) == 0) {
-                			filepointer = (struct file_data*) &shared->fdata[vectornum];
-                			break;
-            			}
-            			vectornum++;
-        			}
-
                     pthread_mutex_lock(&filepointer->file_mutex);
 
 				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -287,7 +308,7 @@ void* worker(void* data) {
 			} else {        // content length isn't provided
 
                 char *responsePut = new char[20000];
-                if (access(filename, F_OK) == -1) {         // no content length and file doesn't exist
+                if (shared->fileexists == 0) {         // no content length and file doesn't exist
 
                     pthread_mutex_lock(&shared->global_mutex);
 
@@ -322,14 +343,6 @@ void* worker(void* data) {
                 }
                 else {              // no content length and file exists already
 
-					int vectornum = 0;
-        			for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
-            			if ((strcmp(filename, i->filename)) == 0) {
-                			filepointer = (struct file_data*) &shared->fdata[vectornum];
-                			break;
-            			}
-            			vectornum++;
-        			}
                     pthread_mutex_lock(&filepointer->file_mutex);
 
 
@@ -357,12 +370,13 @@ void* worker(void* data) {
 
 		/********************************************************** PUT WITH REDUNDANCY **********************************************************/
 
-		int putfdr[3];
+		printf("does it exist: %d\n", shared->fileexists);
+		int putfdr[3] = { 0 };
 		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 1)) {
             
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
-			struct file_data* filepointer;
+			//struct file_data* filepointer;
 
 			if(ptrlength != NULL) {     // content length provided
 
@@ -371,7 +385,8 @@ void* worker(void* data) {
 
             	char *responsePut = new char[500];
 
-                if(access(filename, F_OK) == -1) {          // content length provided and file doesn't exist
+                if(shared->fileexists == 0) {          // content length provided and file doesn't exist
+					printf("file doesnt exist\n");
 
                     pthread_mutex_lock(&shared->global_mutex);
 
@@ -383,38 +398,7 @@ void* worker(void* data) {
                     filepointer = (struct file_data*) &shared->fdata.back();
                     pthread_mutex_lock(&filepointer->file_mutex);
 
-                    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-
-				    for(int i = contentlength; i > 0; i--) {
-					    n = recv(commfd, buf, sizeof(char), 0);
-					    if(n < 0) { warn("recv()"); }
-					    if(n == 0) { break; }
-					    write(STDOUT_FILENO, buf, sizeof(char));
-					    write(putfd, buf, sizeof(char));
-					    memset(&buf, 0, sizeof(buf));
-				    }
-
-				    close(putfd);
-				    sendheader(commfd, responsePut, 201, 0);
-                    pthread_mutex_unlock(&filepointer->file_mutex);
-                    pthread_mutex_unlock(&shared->global_mutex);
-
-				    delete[] responsePut;
-                }
-                else {      // content length provided and file exists already
-
-					int vectornum = 0;
-        			for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
-            			if ((strcmp(filename, i->filename)) == 0) {
-                			filepointer = (struct file_data*) &shared->fdata[vectornum];
-                			break;
-            			}
-            			vectornum++;
-        			}
-
-                    pthread_mutex_lock(&filepointer->file_mutex);
-
-					char path[100];
+                    char path[100];
 					for(int d = 0; d < 3; d++) {
 						sprintf(path, "copy%d/%s", d+1, filename);
 
@@ -434,17 +418,52 @@ void* worker(void* data) {
 					    memset(&buf, 0, sizeof(buf));
 				    }
 
-				    close(putfd);
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
+
+				    delete[] responsePut;
+                }
+                else {      // content length provided and file exists already
+
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+					char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
+
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
 				    sendheader(commfd, responsePut, 201, 0);
                     pthread_mutex_unlock(&filepointer->file_mutex);
 
 				    delete[] responsePut;
                 }
 
-			} else {        // content length isn't provided
+			} 
+			else {        // content length isn't provided
 
                 char *responsePut = new char[500];
-                if (access(filename, F_OK) == -1) {         // no content length and file doesn't exist
+                if (shared->fileexists == 0) {         // no content length and file doesn't exist
 
                     pthread_mutex_lock(&shared->global_mutex);
 
@@ -457,7 +476,14 @@ void* worker(void* data) {
                     pthread_mutex_lock(&filepointer->file_mutex);
 
 
-				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				    char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
+
 				    sendheader(commfd, responsePut, 201, 0);
 
 				    while (1) {
@@ -466,11 +492,16 @@ void* worker(void* data) {
 						    break;
 					    }
 					    write(STDOUT_FILENO, buf, sizeof(char));
-					    write(putfd, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
 					    memset(&buf, 0, sizeof(buf));
 				    }
 
-				    close(putfd);
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
 
                     pthread_mutex_unlock(&filepointer->file_mutex);
                     pthread_mutex_unlock(&shared->global_mutex);
@@ -479,18 +510,16 @@ void* worker(void* data) {
                 }
                 else {              // no content length and file exists already
 
-					int vectornum = 0;
-        			for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
-            			if ((strcmp(filename, i->filename)) == 0) {
-                			filepointer = (struct file_data*) &shared->fdata[vectornum];
-                			break;
-            			}
-            			vectornum++;
-        			}
                     pthread_mutex_lock(&filepointer->file_mutex);
 
 
-				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				    char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
 				    sendheader(commfd, responsePut, 201, 0);
 
 				    while (1) {
@@ -499,11 +528,16 @@ void* worker(void* data) {
 						    break;
 					    }
 					    write(STDOUT_FILENO, buf, sizeof(char));
-					    write(putfd, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
 					    memset(&buf, 0, sizeof(buf));
 				    }
 
-				    close(putfd);
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
 
                     pthread_mutex_unlock(&filepointer->file_mutex);
                     delete[] responsePut;
