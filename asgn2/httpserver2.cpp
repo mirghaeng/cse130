@@ -93,7 +93,6 @@ void* worker(void* data) {
         }
         commfd = shared->session_queue.front().commfd;
         shared->session_queue.pop();
-        //pthread_cond_signal(&shared->dispatcher_cond);
         pthread_mutex_unlock(&shared->global_mutex);
 
         char buf[100];
@@ -169,6 +168,14 @@ void* worker(void* data) {
         int getfd;	
 		memset(&buf, 0, sizeof(buf));
 		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
+            char filepath1[100] = "copy1/";
+            strcat(filepath1, filename);
+            char filepath2[100] = "copy2/";
+            strcat(filepath2, filename);
+            char filepath3[100] = "copy3/";
+            strcat(filepath3, filename);
+
+
 			if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
@@ -404,22 +411,101 @@ int main(int argc, char* argv[]) {
     // go through each file in directory and make a lock
     struct dirent *dp;
     DIR *pdir;
-    pdir = opendir("./");
-    while ((dp = readdir(pdir)) != NULL) {
+    if (redundancy == 0) {
+        pdir = opendir("./");
+        while ((dp = readdir(pdir)) != NULL) {
 
-        if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")) {
-            // do nothing
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")) {
+                // do nothing
+            }
+            else {
+                char* file_name = dp->d_name;
+
+                struct file_data filedata;
+                filedata.filename = file_name;
+                pthread_mutex_init(&filedata.file_mutex, NULL);
+                common_data.fdata.push_back(filedata);
+            }
         }
-        else {
-            char* file_name = dp->d_name;
-
-            struct file_data filedata;
-            filedata.filename = file_name;
-            pthread_mutex_init(&filedata.file_mutex, NULL);
-            common_data.fdata.push_back(filedata);
-        }
-
     }
+    else {      // redundacy = 1
+        pdir = opendir("copy1");
+        while ((dp = readdir(pdir)) != NULL) {
+
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")) {
+                // do nothing
+            }
+            else {
+                char* file_name = dp->d_name;
+
+                struct file_data filedata;
+                filedata.filename = file_name;
+                pthread_mutex_init(&filedata.file_mutex, NULL);
+                common_data.fdata.push_back(filedata);
+                printf("copy1: %s\n", file_name);
+            }
+        }
+
+        pdir = opendir("copy2");
+        while ((dp = readdir(pdir)) != NULL) {
+
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")) {    // if is it . or .. files
+                // do nothing
+            }
+            else {      // actual files
+                char* file_name = dp->d_name;
+
+                int alreadyexists = 0;
+                for (std::vector<file_data>::iterator i = common_data.fdata.begin(); i != common_data.fdata.end(); ++i) {
+                    if ((strcmp(file_name, i->filename)) == 0) {        // file already has a lock
+                        alreadyexists = 1;
+                        break;
+                    }
+                }
+                if (alreadyexists == 1) {
+                    // do nothing
+                }
+                else {
+                    struct file_data filedata;
+                    filedata.filename = file_name;
+                    pthread_mutex_init(&filedata.file_mutex, NULL);
+                    common_data.fdata.push_back(filedata);
+                    printf("copy2: %s\n", file_name);
+                }
+            }
+        }
+
+        pdir = opendir("copy3");
+        while ((dp = readdir(pdir)) != NULL) {
+
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..")) {    // if is it . or .. files
+                // do nothing
+            }
+            else {      // actual files
+                char* file_name = dp->d_name;
+
+                int alreadyexists = 0;
+                for (std::vector<file_data>::iterator i = common_data.fdata.begin(); i != common_data.fdata.end(); ++i) {
+                    if ((strcmp(file_name, i->filename)) == 0) {        // file already has a lock
+                        alreadyexists = 1;
+                        break;
+                    }
+                }
+                if (alreadyexists == 1) {
+                    // do nothing
+                }
+                else {
+                    struct file_data filedata;
+                    filedata.filename = file_name;
+                    pthread_mutex_init(&filedata.file_mutex, NULL);
+                    common_data.fdata.push_back(filedata);
+                    printf("copy3: %s\n", file_name);
+                }
+            }
+        }
+    }
+    closedir(pdir);
+
 
     // create pthreads
     pthread_t worker_tid[SIZE];
