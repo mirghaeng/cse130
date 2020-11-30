@@ -242,9 +242,6 @@ void* worker(void* data) {
             if (access(path3, R_OK) == -1) {
                 majorityR[2]++;
             }
-			// for (int k = 0; k < 3; k++) {
-			// 	printf("F: %d , R: %d\n", majorityF[k], majorityR[k]);
-			// }
 
 			if((majorityF[0] + majorityF[1] + majorityF[2]) >= 2) {     // most paths weren't found
 
