@@ -13,7 +13,7 @@
 #include <queue>
 #include <vector>
 #include <dirent.h>
-#include<errno.h>
+#include <errno.h>
 
 #define SMALLBUF 500
 #define LARGEBUF 10000
@@ -212,11 +212,11 @@ void* worker(void* data) {
 			char* ptrlength = strstr(header, "Content-Length:");
 
 			char path[SMALLBUF];
-			for(int d = 1; d <= 3; d++) {
-				sprintf(path, "/.copy%d/%s", d, filename);
+			for(int d = 0; d < 3; d++) {
+				sprintf(path, ".copy%d/%s", d+1, filename);
 
 				// create / overwrite new file in directory
-				putfd[d-1] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				putfd[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 			}
 
 			if(ptrlength != NULL) {
@@ -229,17 +229,14 @@ void* worker(void* data) {
             	// 201 Created header
             	sendheader(commfd, responsePut, 201, contentlength);
 
-            	//char newline[] = "\n";
-				//write(STDOUT_FILENO, newline, strlen(newline));
-
             	// put specificed length of contents into file
 				for(int i = 0; i < contentlength; i++) {
 					n = recv(commfd, buf, sizeof(char), 0);
 					if(n < 0) { warn("recv()"); }
 					if(n == 0) { break; }
 					for(int j = 0; j < 3; j++) {
-						write(STDOUT_FILENO, buf, contentlength);
-						write(putfd[j], buf, sizeof(char));
+						n = write(putfd[j], buf, sizeof(char));
+						if(n < 0) { err(1, "write()"); }
 					}
 					memset(&buf, 0, sizeof(buf));
 				}
@@ -251,7 +248,6 @@ void* worker(void* data) {
 				contentlength = recv(commfd, buf, sizeof(char), 0);
 				if(contentlength < 0) { err(1, "recv()"); }
 				for(int j = 0; j < 3; j++) {
-					write(STDOUT_FILENO, buf, contentlength);
 					write(putfd[j], buf, contentlength);
 				}
 
@@ -356,53 +352,6 @@ int main(int argc, char* argv[]) {
     }
     closedir(pdir);
 
-    /*char directory[SMALLBUF];
-    for(int i = 1; i <= 3; i++) {
-
-    	sprintf(directory, ".copy%d", i);
-    	struct dirent *dpcopy;
-		DIR *pdircopy = opendir(directory);
-
-    	if(mkdir(directory, 0777) && errno == EEXIST) {
-
-    		chdir(directory);
-    		while((dpcopy = readdir(pdircopy)) != NULL) {
-	  			unlink(dpcopy->d_name);
-    		}
-    		chdir("..");
-    	}
-    	closedir(pdircopy);
-
-		for(int j = 0; j < (int)shared.files.size(); j++) {
-
-			if(!strcmp(shared.files[j].filename, ".copy1") ||
-				!strcmp(shared.files[j].filename, ".copy2") ||
-				!strcmp(shared.files[j].filename, ".copy3") ||
-				!strcmp(shared.files[j].filename, ".") ||
-				!strcmp(shared.files[j].filename, "..")) { continue; }
-
-			char path[SMALLBUF];
-			sprintf(path, ".copy%d/%s", i, shared.files[j].filename);
-
-			//printf("filename: %s\n", shared.files[j].filename);
-			//printf("path: %s\n", path);
-
-			int infd = open(shared.files[j].filename, O_RDONLY);
-			if(infd < 0) { err(1, "infd - open()"); }
-			int outfd = open(path, O_CREAT | O_WRONLY);
-			if(outfd < 0) { err(1, "outfd - open()"); }
-			
-			char buf[SMALLBUF];
-			while(read(infd, buf, sizeof(char))) {
-				write(outfd, buf, sizeof(char));
-				memset(&buf, 0, sizeof(buf));
-			}
-
-			close(infd);
-			close(outfd);
-	    }
-	}*/
-
 	// create pthreads
     pthread_t worker_tid[SMALLBUF]; 
 
@@ -419,8 +368,8 @@ int main(int argc, char* argv[]) {
         }
         pthread_mutex_unlock(&shared.sessions_mutex);
 
-        //char waiting[] = "Waiting for connection...\n\n";
-		//write(STDOUT_FILENO, waiting, strlen(waiting));
+        char waiting[] = "\nWaiting for connection...\n\n";
+		write(STDOUT_FILENO, waiting, strlen(waiting));
 		int servaddr_length = sizeof(servaddr);
 		int commfd = accept(sockfd, (struct sockaddr*)&servaddr, (socklen_t*)&servaddr_length);
 		if(commfd < 0) {
