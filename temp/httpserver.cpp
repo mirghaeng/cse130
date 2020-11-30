@@ -352,53 +352,6 @@ int main(int argc, char* argv[]) {
     }
     closedir(pdir);
 
-    /*char directory[SMALLBUF];
-    for(int i = 1; i <= 3; i++) {
-
-    	sprintf(directory, ".copy%d", i);
-    	struct dirent *dpcopy;
-		DIR *pdircopy = opendir(directory);
-
-    	if(mkdir(directory, 0777) && errno == EEXIST) {
-
-    		chdir(directory);
-    		while((dpcopy = readdir(pdircopy)) != NULL) {
-	  			unlink(dpcopy->d_name);
-    		}
-    		chdir("..");
-    	}
-    	closedir(pdircopy);
-
-		for(int j = 0; j < (int)shared.files.size(); j++) {
-
-			if(!strcmp(shared.files[j].filename, ".copy1") ||
-				!strcmp(shared.files[j].filename, ".copy2") ||
-				!strcmp(shared.files[j].filename, ".copy3") ||
-				!strcmp(shared.files[j].filename, ".") ||
-				!strcmp(shared.files[j].filename, "..")) { continue; }
-
-			char path[SMALLBUF];
-			sprintf(path, ".copy%d/%s", i, shared.files[j].filename);
-
-			//printf("filename: %s\n", shared.files[j].filename);
-			//printf("path: %s\n", path);
-
-			int infd = open(shared.files[j].filename, O_RDONLY);
-			if(infd < 0) { err(1, "infd - open()"); }
-			int outfd = open(path, O_CREAT | O_WRONLY);
-			if(outfd < 0) { err(1, "outfd - open()"); }
-			
-			char buf[SMALLBUF];
-			while(read(infd, buf, sizeof(char))) {
-				write(outfd, buf, sizeof(char));
-				memset(&buf, 0, sizeof(buf));
-			}
-
-			close(infd);
-			close(outfd);
-	    }
-	}*/
-
 	// create pthreads
     pthread_t worker_tid[SMALLBUF]; 
 
