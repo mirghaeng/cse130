@@ -169,20 +169,7 @@ void* worker(void* data) {
             }
             vectornum++;
         }
-		pthread_mutex_lock(&shared->global_mutex);
-		// if the file doesnt exist, create one and add it to the vector
-		if (strcmp(type, "PUT") && (shared->fileexists == 0)) {
-
-            struct file_data file_data;
-			strcpy(file_data.filename, filename);
-            pthread_mutex_init(&file_data.file_mutex, NULL);
-            shared->fdata.push_back(file_data);
-
-            filepointer = (struct file_data*) &shared->fdata.back();
-			shared->fileexists = 1;
-		}
-		printf("file is %s\n", filepointer->filename);
-		pthread_mutex_unlock(&shared->global_mutex);
+		
         /********************************************************** GET WITHOUT REDUNDANCY **********************************************************/
         int getfd;	
 		memset(&buf, 0, sizeof(buf));
@@ -370,13 +357,11 @@ void* worker(void* data) {
 
 		/********************************************************** PUT WITH REDUNDANCY **********************************************************/
 
-		printf("does it exist: %d\n", shared->fileexists);
 		int putfdr[3] = { 0 };
 		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 1)) {
             
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
-			//struct file_data* filepointer;
 
 			if(ptrlength != NULL) {     // content length provided
 
@@ -386,7 +371,6 @@ void* worker(void* data) {
             	char *responsePut = new char[500];
 
                 if(shared->fileexists == 0) {          // content length provided and file doesn't exist
-					printf("file doesnt exist\n");
 
                     pthread_mutex_lock(&shared->global_mutex);
 
