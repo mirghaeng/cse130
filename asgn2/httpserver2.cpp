@@ -169,20 +169,11 @@ void* worker(void* data) {
             }
             vectornum++;
         }
-		
+
         /********************************************************** GET WITHOUT REDUNDANCY **********************************************************/
         int getfd;	
 		memset(&buf, 0, sizeof(buf));
-		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
-			// struct file_data* filepointer;
-        	// int vectornum = 0;
-        	// for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
-            // 	if ((strcmp(filename, i->filename)) == 0) {
-            //     	filepointer = (struct file_data*) &shared->fdata[vectornum];
-            //     	break;
-            // 	}
-            // 	vectornum++;
-        	// }
+		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 0)) {
 
 			if(access(filename, F_OK) == -1) {
 
@@ -219,7 +210,301 @@ void* worker(void* data) {
 
                 delete[] responseGet;
 			}
-		}		
+		}	
+
+		        /********************************************************** GET WITH REDUNDANCY **********************************************************/
+        int getfdr[3];
+        if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 1)) {
+
+            int majorityF[3] = { 0 };
+            int majorityR[3] = { 0 };
+            char path1[100];
+            sprintf(path1, "copy1/%s", filename);
+            if (access(path1, F_OK) == -1) {
+                majorityF[0]++;
+            }
+            if (access(path1, R_OK) == -1) {
+                majorityR[0]++;
+            }
+            char path2[100];
+            sprintf(path2, "copy2/%s", filename);
+            if (access(path2, F_OK) == -1) {
+                majorityF[1]++;
+            }
+            if (access(path2, R_OK) == -1) {
+                majorityR[1]++;
+            }
+            char path3[100];
+            sprintf(path3, "copy3/%s", filename);
+            if (access(path3, F_OK) == -1) {
+                majorityF[2]++;
+            }
+            if (access(path3, R_OK) == -1) {
+                majorityR[2]++;
+            }
+			// for (int k = 0; k < 3; k++) {
+			// 	printf("F: %d , R: %d\n", majorityF[k], majorityR[k]);
+			// }
+
+			if((majorityF[0] + majorityF[1] + majorityF[2]) >= 2) {     // most paths weren't found
+
+				// 404 File Not Found
+				errors = ERROR;
+				sendheader(commfd, response, 404, 0);
+			} 
+            else if((majorityR[0] + majorityR[1] + majorityR[2]) >= 2) {		// most paths dont have reading access
+
+				// 403 Forbidden
+				errors = ERROR;
+				sendheader(commfd, response, 403, 0);
+			} 
+			else if(((majorityF[0] == 1) && (majorityR[1] == 1)) || ((majorityF[0] == 1) && (majorityR[2] == 1)) ||
+						((majorityF[1] == 1) && (majorityR[0] == 1)) || ((majorityF[1] == 1) && (majorityR[2] == 1)) ||
+						((majorityF[2] == 1) && (majorityR[0] == 1)) || ((majorityF[2] == 1) && (majorityR[1] == 1))) {
+				// 500 Internal Service Error
+
+				errors = ERROR;
+				sendheader(commfd, response, 500, 0);
+			}
+            else {
+				int filesize1, filesize2;
+				char officialpath[100];
+                // compare all files
+				// at this point only possibility is if all three files are gucci, or one doesnt exist/cant read
+				if ((majorityF[0] == 1) || (majorityR[0] == 1)) {
+					// compare path2 and path3
+					stat(path2, &st);
+					filesize1 = st.st_size;
+					stat(path3, &st);
+					filesize2 = st.st_size;
+					if (filesize1 != filesize2) {
+						// 500 Internal Service Error
+
+						errors = ERROR;
+						sendheader(commfd, response, 500, 0);
+					}
+					pthread_mutex_lock(&filepointer->file_mutex);
+					// check character by character
+					getfdr[1] = open(path2, O_RDONLY);
+					getfdr[2] = open(path3, O_RDONLY);
+					char buf1[100];
+					char buf2[100];
+					while(read(getfdr[1], buf1, sizeof(char) || read(getfdr[2], buf2, sizeof(char)))) {
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							// 500 Internal Service Error
+
+							errors = ERROR;
+							sendheader(commfd, response, 500, 0);
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						strcpy(officialpath, path2);
+						filesize = filesize1;
+					}
+					close(getfdr[1]);
+					close(getfdr[2]);
+					pthread_mutex_unlock(&filepointer->file_mutex);
+
+				}
+				else if ((majorityF[1] == 1) || (majorityR[1] == 1)) {
+					// compare path1 and path3
+					stat(path1, &st);
+					filesize1 = st.st_size;
+					stat(path3, &st);
+					filesize2 = st.st_size;
+					if (filesize1 != filesize2) {
+						// 500 Internal Service Error
+
+						errors = ERROR;
+						sendheader(commfd, response, 500, 0);
+					}
+					// check character by character
+
+					pthread_mutex_lock(&filepointer->file_mutex);
+					// check character by character
+					getfdr[0] = open(path1, O_RDONLY);
+					getfdr[2] = open(path3, O_RDONLY);
+					char buf1[100];
+					char buf2[100];
+					while(read(getfdr[0], buf1, sizeof(char) || read(getfdr[2], buf2, sizeof(char)))) {
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							// 500 Internal Service Error
+
+							errors = ERROR;
+							sendheader(commfd, response, 500, 0);
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						strcpy(officialpath, path1);
+						filesize = filesize1;
+					}
+					close(getfdr[0]);
+					close(getfdr[2]);
+					pthread_mutex_unlock(&filepointer->file_mutex);
+
+				}
+				else if ((majorityF[2] == 1) || (majorityR[2] == 1)) {
+					// compare path1 and path2
+					stat(path1, &st);
+					filesize1 = st.st_size;
+					stat(path2, &st);
+					filesize2 = st.st_size;
+					if (filesize1 != filesize2) {
+						// 500 Internal Service Error
+
+						errors = ERROR;
+						sendheader(commfd, response, 500, 0);
+					}
+					// check character by character
+
+					pthread_mutex_lock(&filepointer->file_mutex);
+					// check character by character
+					getfdr[0] = open(path1, O_RDONLY);
+					getfdr[1] = open(path2, O_RDONLY);
+					char buf1[100];
+					char buf2[100];
+					while(read(getfdr[0], buf1, sizeof(char) || read(getfdr[1], buf2, sizeof(char)))) {
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							// 500 Internal Service Error
+
+							errors = ERROR;
+							sendheader(commfd, response, 500, 0);
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						strcpy(officialpath, path1);
+						filesize = filesize1;
+					}
+					close(getfdr[0]);
+					close(getfdr[1]);
+					pthread_mutex_unlock(&filepointer->file_mutex);
+
+				}
+				else {
+					// compare all paths
+					errors = NO_ERROR_YET;
+					getfdr[0] = open(path1, O_RDONLY);
+					getfdr[1] = open(path2, O_RDONLY);
+					getfdr[2] = open(path3, O_RDONLY);
+					char buf1[100] = { 0 };
+					char buf2[100] = { 0 };
+					// check copy1 and copy 2
+					pthread_mutex_lock(&filepointer->file_mutex);
+					while ((read(getfdr[0], buf1, sizeof(char)))) {
+						read(getfdr[1], buf2, sizeof(char));
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							printf("error1\n");
+
+							errors = ERROR;
+							break;
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						printf("no errors first try\n");
+						strcpy(officialpath, path1);
+						filesize = filesize1;
+					}
+					close(getfdr[0]);
+					close(getfdr[1]);
+					close(getfdr[2]);
+
+					// check if copy2 and copy3 are the same
+					if (errors == ERROR) {
+						errors = NO_ERROR_YET;
+						getfdr[0] = open(path1, O_RDONLY);
+						getfdr[1] = open(path2, O_RDONLY);
+						getfdr[2] = open(path3, O_RDONLY);
+						// if there was an error, check copy2 and copy3
+						while((read(getfdr[1], buf1, sizeof(char)))) {
+							read(getfdr[2], buf2, sizeof(char));
+							if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+								printf("error2\n");
+
+								errors = ERROR;
+								break;
+							}
+							memset(&buf1, 0, sizeof(buf1));
+							memset(&buf2, 0, sizeof(buf2));
+						}
+						if (errors == NO_ERROR_YET) {
+							// set official path to one of the paths
+							strcpy(officialpath, path2);
+							filesize = filesize1;
+						}
+						close(getfdr[0]);
+						close(getfdr[1]);
+						close(getfdr[2]);
+
+						// check copy1 and copy3
+						if (errors == ERROR) {
+							errors = NO_ERROR_YET;
+							getfdr[0] = open(path1, O_RDONLY);
+							getfdr[1] = open(path2, O_RDONLY);
+							getfdr[2] = open(path3, O_RDONLY);
+							// if there was an error, check copy2 and copy3
+							while((read(getfdr[0], buf1, sizeof(char)))) {
+								read(getfdr[2], buf2, sizeof(char));
+								if (memcmp(buf1, buf2, sizeof(buf1)) != 0) {
+									// 500 Internal Service Error
+									printf("error3\n");
+
+									errors = ERROR;
+									sendheader(commfd, response, 500, 0);
+									break;
+								}
+								memset(&buf1, 0, sizeof(buf1));
+								memset(&buf2, 0, sizeof(buf2));
+							}
+							if (errors == NO_ERROR_YET) {
+								// set official path to one of the paths
+								strcpy(officialpath, path1);
+								filesize = filesize1;
+							}
+							close(getfdr[0]);
+							close(getfdr[1]);
+							close(getfdr[2]);
+						}
+					}
+					pthread_mutex_unlock(&filepointer->file_mutex);
+				}
+
+				if (errors == NO_ERROR_YET) {
+					// open the official path and send
+
+					char *responseGet;
+                	responseGet = new char[500];
+
+					pthread_mutex_lock(&filepointer->file_mutex);
+
+					sendheader(commfd, responseGet, 200, filesize);
+
+					// get file contents
+					getfd = open(officialpath, O_RDONLY);
+					while(read(getfd, buf, sizeof(char))) {
+						send(commfd, buf, sizeof(char), 0);
+						memset(&buf, 0, sizeof(buf));
+					}
+
+					close(getfd);
+                	pthread_mutex_unlock(&filepointer->file_mutex);
+
+                	delete[] responseGet;
+				}
+
+			}
+		}	
 
 
 		/********************************************************** PUT WITHOUT REDUNDANCY **********************************************************/
@@ -714,8 +999,6 @@ int main(int argc, char* argv[]) {
     }
 
     // dispatcher thread
-    //struct shared_data* shared = (struct shared_data*) &common_data;
-    //int sockfd = shared->sockfd;
 
     while (1) {
 
