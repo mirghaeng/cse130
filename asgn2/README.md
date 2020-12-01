@@ -21,7 +21,7 @@ Limitations or known issues \
 
 -------------------------------------------------
 
-httpserver.cpp (\*edit) \
+httpserver.cpp \
 	&ensp;&ensp;&ensp;This program implements a multi-threaded HTTP server that responds \
 	&ensp;&ensp;&ensp;to GET and PUT commands to read and write files named by 10-characters \
 	&ensp;&ensp;&ensp;in ASCII. A user can specify number of threads and/or to enable redundancy. \
