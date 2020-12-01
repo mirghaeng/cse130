@@ -1,23 +1,23 @@
 Assignment 2 \
 Name: Miranda Eng & Shirley Phuong \
-CSE130: Principles of Computer Systems Design \ 
+CSE130: Principles of Computer Systems Design \
 November 30, 2020 \
 
 To run httpserver: \
 	&ensp;&ensp;&ensp;make \
 	&ensp;&ensp;&ensp;./httpserver &lt;address&gt; &lt;port-number&gt; [options] \
-  options: \
-  -N to set number of threads \
-  -r to enable redundancy \
+	&ensp;&ensp;&ensp;options: \
+	&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;-N to set number of threads \
+	&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;-r to enable redundancy \
 
 Example run:  
-	&ensp;&ensp;&ensp;./httpserver localhost 8080
-	&ensp;&ensp;&ensp;./httpserver localhost 8080 -N 3
-	&ensp;&ensp;&ensp;./httpserver localhost 8080 -r
-	&ensp;&ensp;&ensp;./httpserver localhost 8080 -N 3 -r
+	&ensp;&ensp;&ensp;./httpserver localhost 8080 \
+	&ensp;&ensp;&ensp;./httpserver localhost 8080 -N 3 \
+	&ensp;&ensp;&ensp;./httpserver localhost 8080 -r \
+	&ensp;&ensp;&ensp;./httpserver localhost 8080 -N 3 -r \
 
-Limitations or known issues  
-	&ensp;&ensp;&ensp;None found so far  
+Limitations or known issues \
+	&ensp;&ensp;&ensp;None found so far \
 
 -------------------------------------------------
 
