@@ -6,9 +6,9 @@ November 30, 2020
 To run httpserver:  
 	&ensp;&ensp;&ensp;make  
 	&ensp;&ensp;&ensp;./httpserver &lt;address&gt; &lt;port-number&gt; [options]
-	&ensp;&ensp;&ensp;options:
-	  -N to set number of threads
-	  -r to enable redundancy
+  options:
+  -N to set number of threads
+  -r to enable redundancy
 
 Example run:  
 	&ensp;&ensp;&ensp;./httpserver localhost 8080
