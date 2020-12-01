@@ -1,14 +1,14 @@
-Assignment 2
-Name: Miranda Eng & Shirley Phuong  
-CSE130: Principles of Computer Systems Design  
-November 30, 2020  
+Assignment 2 \
+Name: Miranda Eng & Shirley Phuong \
+CSE130: Principles of Computer Systems Design \ 
+November 30, 2020 \
 
-To run httpserver:  
-	&ensp;&ensp;&ensp;make  
-	&ensp;&ensp;&ensp;./httpserver &lt;address&gt; &lt;port-number&gt; [options]
-  options:
-  -N to set number of threads
-  -r to enable redundancy
+To run httpserver: \
+	&ensp;&ensp;&ensp;make \
+	&ensp;&ensp;&ensp;./httpserver &lt;address&gt; &lt;port-number&gt; [options] \
+  options: \
+  -N to set number of threads \
+  -r to enable redundancy \
 
 Example run:  
 	&ensp;&ensp;&ensp;./httpserver localhost 8080
