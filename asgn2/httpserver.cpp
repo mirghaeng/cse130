@@ -11,29 +11,35 @@
 #include <err.h>
 #include <pthread.h>
 #include <queue>
+#include <vector>
+#include <dirent.h>
 
-#define SIZE 10000
+#define DEFAULT_THREADS 4
+#define SIZE 500
 
 #define ERROR 1
-#define NO_ERROR 0
+#define NO_ERROR_YET 0
 
-struct session {
-	int commfd;
+struct file_data {
+    char filename[100];
+    pthread_mutex_t file_mutex;
 };
 
-struct file {
-	char* filename;
-	pthread_mutex_t file_mutex;
+struct sessions {
+    int commfd;
 };
 
 struct shared_data {
-	int numthreads;
-	int sockfd;
-	struct sockaddr_in servaddr;
-	std::queue<session*> sessions;
-	std::vector<file*> files;
-	pthread_mutex_t sessions_mutex;
-	pthread_cond_t dispatcher_cond, worker_cond;
+    pthread_mutex_t global_mutex;
+    pthread_cond_t dispatcher_cond, worker_cond;
+    int rflag;
+    int sockfd;
+    int numthreads;
+    int currentrequests;
+	int fileexists;
+    struct sockaddr_in servaddr;
+    std::vector<file_data> fdata;
+    std::queue<sessions> session_queue;
 };
 
 const char* getStatus(int code) {
@@ -66,103 +72,64 @@ unsigned long getaddr(char *name) {
 }
 
 void sendheader(int commfd, char* response, int code, int length) {
-	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
+	sprintf(response, "\nHTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
 	int errno = send(commfd, response, strlen(response), 0);
-	if(errno < 0) { warn("send()"); }
+	if (errno < 0) { warn("send()"); }
 }
 
-void* dispatcher(void* arg) {
-	shared_data* client = (shared_data*)arg;
-	int sockfd = client->sockfd;
+void* worker(void* data) {
+    // struct
+    struct shared_data* shared = (struct shared_data*) data;
+    struct stat st;
 
-	while(1) {
+    while(1) {
 
-		pthread_mutex_lock(&(client->sessions_mutex));
-		while((int)client->sessions.size() >= client->numthreads) {
-			// if queue is full, wait
-			pthread_cond_wait(&(client->dispatcher_cond), &(client->sessions_mutex));
-		}
-		pthread_mutex_unlock(&(client->sessions_mutex));
+        int commfd = 0;
 
-		session* ses = new session;
+        // lock global mutex to get data
+        pthread_mutex_lock(&shared->global_mutex);
+        while (shared->session_queue.empty()) {
+            pthread_cond_wait(&shared->worker_cond, &shared->global_mutex);
+        }
+        commfd = shared->session_queue.front().commfd;
+        shared->session_queue.pop();
+        //pthread_cond_signal(&shared->dispatcher_cond);
+        pthread_mutex_unlock(&shared->global_mutex);
 
-		// socket accept
-		char waiting[] = "Waiting for connection...\n";
-		write(STDOUT_FILENO, waiting, strlen(waiting));
-		int servaddr_length = sizeof(client->servaddr);
-		ses->commfd = accept(sockfd, (struct sockaddr*)&(client->servaddr), (socklen_t*)&servaddr_length);
-		if(ses->commfd < 0) {
-			warn("accept()");
-			continue;
-		}
-		
-		pthread_mutex_lock(&(client->sessions_mutex));
-		client->sessions.push(ses);
-		// tell waiting consumers they can now work
-		pthread_cond_signal(&(client->worker_cond));
-		pthread_mutex_unlock(&(client->sessions_mutex));
-	}
-}
+        char buf[100];
+		char header[5000];
+		char headercpy[5000];
+		char response[500];       // initialize to size of content + 10000 for the header
+		char *end_of_header, *type, *filename;
+		int errors = NO_ERROR_YET;
+        int contentlength, filesize;
 
-void* worker(void* arg) {
-	shared_data* client = (shared_data*)arg;
-
-	struct stat st;
-	int getfd, filesize;
-	int putfd, contentlength;
-	int errno;
-	char buf[SIZE];
-	char header[SIZE];
-	char headercpy[SIZE];
-	char response[SIZE];
-	char *end_of_header, *type, *filename;
-	int errors = NO_ERROR;
-
-	while(1) {
-
-		pthread_mutex_lock(&(client->sessions_mutex));
-		while(client->sessions.empty()) {
-			// wait if buffer is empty
-			pthread_cond_wait(&(client->worker_cond), &(client->sessions_mutex));
-		}
-		session* ses = client->sessions.front();
-		int commfd = ses->commfd;
-		client->sessions.pop();
-		delete ses;
-		pthread_mutex_unlock(&(client->sessions_mutex));
-
-		// socket read request
-		while(recv(commfd, buf, sizeof(char), 0) > 0) {
-			write(STDOUT_FILENO, buf, sizeof(char));
-			strcat(header, buf);
-			end_of_header = strstr(header, "\r\n\r\n");
-			if(end_of_header != NULL) { break; }
+        while(recv(commfd, buf, sizeof(char), 0) > 0) {
+		    write(STDOUT_FILENO, buf, sizeof(char));
+		    strcat(header, buf);
+		    end_of_header = strstr(header, "\r\n\r\n");
+		    if(end_of_header != NULL) { break; }
 			memset(&buf, 0, sizeof(buf));
 		}
 
-		// get request type
+        // get request type
 		strcpy(headercpy, header);
 		type = strtok(headercpy, " ");
-
+		
 		// get filename
 		filename = strtok(NULL, " ");
 		filename++;
 		
-		printf("%s\n", filename);
-		int l = strlen(filename);
-		printf("%d\n", l);
-
 		// check filename length
 		if(strlen(filename) != 10) {
-
 			// 400 Bad Request
 			errors = ERROR;
 			sendheader(commfd, response, 400, 0);
 		}
-		
-		// check filename is alphanumeric
+
+        // check filename is alphanumeric
 		for(char* i = filename; *i != '\0'; i++) {
-			if((isalnum(*i) == 0) && (errors == NO_ERROR)) {
+			if((isalnum(*i) == 0) && (errors == NO_ERROR_YET)) {
 
 				// 400 Bad Request
 				errors = ERROR;
@@ -172,23 +139,42 @@ void* worker(void* arg) {
 
 		// check for HTTP/1.1
 		char* ptrhttp = strstr(header, "HTTP/1.1");
-		if((ptrhttp == NULL) && (errors == NO_ERROR)) {
+		if((ptrhttp == NULL) && (errors == NO_ERROR_YET)) {
 
 			// 400 Bad Request
 			errors = ERROR;
 			sendheader(commfd, response, 400, 0);
 		}
 
-		// restrict HTTP/1.1 methods to GET & PUT
-		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR)) {
+		// check for other HTTP/1.1 methods
+		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR_YET)) {
 
 			// 500 Internal Service Error
 			errors = ERROR;
 			sendheader(commfd, response, 500, 0);
-		}
+        }
 
-		// handling GET request	
-		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR)) {
+
+		struct file_data* filepointer;
+		//int fileexists = 0;
+		shared->fileexists = 0;
+		int vectornum = 0;
+		//pthread_mutex_lock(&shared->global_mutex);
+		// find the file in the vector
+        for (std::vector<file_data>::iterator i = shared->fdata.begin(); i != shared->fdata.end(); ++i) {
+            if ((strcmp(filename, i->filename)) == 0) {
+                filepointer = (struct file_data*) &shared->fdata[vectornum];
+				shared->fileexists = 1;
+            	break;
+            }
+            vectornum++;
+        }
+
+        /********************************************************** GET WITHOUT REDUNDANCY **********************************************************/
+        int getfd;	
+		memset(&buf, 0, sizeof(buf));
+		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 0)) {
+
 			if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
@@ -200,155 +186,841 @@ void* worker(void* arg) {
 				errors = ERROR;
 				sendheader(commfd, response, 403, 0);
 			} else {
-				
+
 				// get file size
 				stat(filename, &st);
 				filesize = st.st_size;
 
-				char *responseGet = new char[SIZE + filesize];
+                char *responseGet;
+                responseGet = new char[500];
 
-				// 200 OK header
+                pthread_mutex_lock(&filepointer->file_mutex);
+
 				sendheader(commfd, responseGet, 200, filesize);
 
-				// send file contents
+				// get file contents
 				getfd = open(filename, O_RDONLY);
-				while(read(getfd, buf, sizeof(char)) > 0) {
+				while(read(getfd, buf, sizeof(char))) {
 					send(commfd, buf, sizeof(char), 0);
 					memset(&buf, 0, sizeof(buf));
 				}
-				close(getfd);
 
-				delete[] responseGet;
+				close(getfd);
+                pthread_mutex_unlock(&filepointer->file_mutex);
+
+                delete[] responseGet;
 			}
-		}		
+		}	
+
+		        /********************************************************** GET WITH REDUNDANCY **********************************************************/
+        int getfdr[3];
+        if((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 1)) {
+
+            int majorityF[3] = { 0 };
+            int majorityR[3] = { 0 };
+            char path1[100];
+            sprintf(path1, "copy1/%s", filename);
+            if (access(path1, F_OK) == -1) {
+                majorityF[0]++;
+            }
+            if (access(path1, R_OK) == -1) {
+                majorityR[0]++;
+            }
+            char path2[100];
+            sprintf(path2, "copy2/%s", filename);
+            if (access(path2, F_OK) == -1) {
+                majorityF[1]++;
+            }
+            if (access(path2, R_OK) == -1) {
+                majorityR[1]++;
+            }
+            char path3[100];
+            sprintf(path3, "copy3/%s", filename);
+            if (access(path3, F_OK) == -1) {
+                majorityF[2]++;
+            }
+            if (access(path3, R_OK) == -1) {
+                majorityR[2]++;
+            }
+
+			if((majorityF[0] + majorityF[1] + majorityF[2]) >= 2) {     // most paths weren't found
+
+				// 404 File Not Found
+				errors = ERROR;
+				sendheader(commfd, response, 404, 0);
+			} 
+            else if((majorityR[0] + majorityR[1] + majorityR[2]) >= 2) {		// most paths dont have reading access
+
+				// 403 Forbidden
+				errors = ERROR;
+				sendheader(commfd, response, 403, 0);
+			} 
+			else if(((majorityF[0] == 1) && (majorityR[1] == 1)) || ((majorityF[0] == 1) && (majorityR[2] == 1)) ||
+						((majorityF[1] == 1) && (majorityR[0] == 1)) || ((majorityF[1] == 1) && (majorityR[2] == 1)) ||
+						((majorityF[2] == 1) && (majorityR[0] == 1)) || ((majorityF[2] == 1) && (majorityR[1] == 1))) {
+				// 500 Internal Service Error
+
+				errors = ERROR;
+				sendheader(commfd, response, 500, 0);
+			}
+            else {
+				int filesize1, filesize2;
+				char officialpath[100];
+                // compare all files
+				// at this point only possibility is if all three files are gucci, or one doesnt exist/cant read
+				if ((majorityF[0] == 1) || (majorityR[0] == 1)) {
+					// compare path2 and path3
+					stat(path2, &st);
+					filesize1 = st.st_size;
+					stat(path3, &st);
+					filesize2 = st.st_size;
+					if (filesize1 != filesize2) {
+						// 500 Internal Service Error
+
+						errors = ERROR;
+						sendheader(commfd, response, 500, 0);
+					}
+					pthread_mutex_lock(&filepointer->file_mutex);
+					// check character by character
+					getfdr[1] = open(path2, O_RDONLY);
+					getfdr[2] = open(path3, O_RDONLY);
+					char buf1[100];
+					char buf2[100];
+					while(read(getfdr[1], buf1, sizeof(char) || read(getfdr[2], buf2, sizeof(char)))) {
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							// 500 Internal Service Error
+
+							errors = ERROR;
+							sendheader(commfd, response, 500, 0);
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						strcpy(officialpath, path2);
+						filesize = filesize1;
+					}
+					close(getfdr[1]);
+					close(getfdr[2]);
+					pthread_mutex_unlock(&filepointer->file_mutex);
+
+				}
+				else if ((majorityF[1] == 1) || (majorityR[1] == 1)) {
+					// compare path1 and path3
+					stat(path1, &st);
+					filesize1 = st.st_size;
+					stat(path3, &st);
+					filesize2 = st.st_size;
+					if (filesize1 != filesize2) {
+						// 500 Internal Service Error
+
+						errors = ERROR;
+						sendheader(commfd, response, 500, 0);
+					}
+					// check character by character
+
+					pthread_mutex_lock(&filepointer->file_mutex);
+					// check character by character
+					getfdr[0] = open(path1, O_RDONLY);
+					getfdr[2] = open(path3, O_RDONLY);
+					char buf1[100];
+					char buf2[100];
+					while(read(getfdr[0], buf1, sizeof(char) || read(getfdr[2], buf2, sizeof(char)))) {
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							// 500 Internal Service Error
+
+							errors = ERROR;
+							sendheader(commfd, response, 500, 0);
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						strcpy(officialpath, path1);
+						filesize = filesize1;
+					}
+					close(getfdr[0]);
+					close(getfdr[2]);
+					pthread_mutex_unlock(&filepointer->file_mutex);
+
+				}
+				else if ((majorityF[2] == 1) || (majorityR[2] == 1)) {
+					// compare path1 and path2
+					stat(path1, &st);
+					filesize1 = st.st_size;
+					stat(path2, &st);
+					filesize2 = st.st_size;
+					if (filesize1 != filesize2) {
+						// 500 Internal Service Error
+
+						errors = ERROR;
+						sendheader(commfd, response, 500, 0);
+					}
+					// check character by character
+
+					pthread_mutex_lock(&filepointer->file_mutex);
+					// check character by character
+					getfdr[0] = open(path1, O_RDONLY);
+					getfdr[1] = open(path2, O_RDONLY);
+					char buf1[100];
+					char buf2[100];
+					while(read(getfdr[0], buf1, sizeof(char) || read(getfdr[1], buf2, sizeof(char)))) {
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							// 500 Internal Service Error
+
+							errors = ERROR;
+							sendheader(commfd, response, 500, 0);
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						strcpy(officialpath, path1);
+						filesize = filesize1;
+					}
+					close(getfdr[0]);
+					close(getfdr[1]);
+					pthread_mutex_unlock(&filepointer->file_mutex);
+
+				}
+				else {
+					// compare all paths
+					errors = NO_ERROR_YET;
+					getfdr[0] = open(path1, O_RDONLY);
+					getfdr[1] = open(path2, O_RDONLY);
+					getfdr[2] = open(path3, O_RDONLY);
+					char buf1[100] = { 0 };
+					char buf2[100] = { 0 };
+					// check copy1 and copy 2
+					pthread_mutex_lock(&filepointer->file_mutex);
+					while ((read(getfdr[0], buf1, sizeof(char)))) {
+						read(getfdr[1], buf2, sizeof(char));
+						if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+							printf("error1\n");
+
+							errors = ERROR;
+							break;
+						}
+						memset(&buf1, 0, sizeof(buf1));
+						memset(&buf2, 0, sizeof(buf2));
+					}
+					if (errors == NO_ERROR_YET) {
+						// set official path to one of the paths
+						printf("no errors first try\n");
+						strcpy(officialpath, path1);
+						filesize = filesize1;
+					}
+					close(getfdr[0]);
+					close(getfdr[1]);
+					close(getfdr[2]);
+
+					// check if copy2 and copy3 are the same
+					if (errors == ERROR) {
+						errors = NO_ERROR_YET;
+						getfdr[0] = open(path1, O_RDONLY);
+						getfdr[1] = open(path2, O_RDONLY);
+						getfdr[2] = open(path3, O_RDONLY);
+						// if there was an error, check copy2 and copy3
+						while((read(getfdr[1], buf1, sizeof(char)))) {
+							read(getfdr[2], buf2, sizeof(char));
+							if (memcmp(buf1, buf2, sizeof(char)) != 0) {
+								printf("error2\n");
+
+								errors = ERROR;
+								break;
+							}
+							memset(&buf1, 0, sizeof(buf1));
+							memset(&buf2, 0, sizeof(buf2));
+						}
+						if (errors == NO_ERROR_YET) {
+							// set official path to one of the paths
+							strcpy(officialpath, path2);
+							filesize = filesize1;
+						}
+						close(getfdr[0]);
+						close(getfdr[1]);
+						close(getfdr[2]);
+
+						// check copy1 and copy3
+						if (errors == ERROR) {
+							errors = NO_ERROR_YET;
+							getfdr[0] = open(path1, O_RDONLY);
+							getfdr[1] = open(path2, O_RDONLY);
+							getfdr[2] = open(path3, O_RDONLY);
+							// if there was an error, check copy2 and copy3
+							while((read(getfdr[0], buf1, sizeof(char)))) {
+								read(getfdr[2], buf2, sizeof(char));
+								if (memcmp(buf1, buf2, sizeof(buf1)) != 0) {
+									// 500 Internal Service Error
+									printf("error3\n");
+
+									errors = ERROR;
+									sendheader(commfd, response, 500, 0);
+									break;
+								}
+								memset(&buf1, 0, sizeof(buf1));
+								memset(&buf2, 0, sizeof(buf2));
+							}
+							if (errors == NO_ERROR_YET) {
+								// set official path to one of the paths
+								strcpy(officialpath, path1);
+								filesize = filesize1;
+							}
+							close(getfdr[0]);
+							close(getfdr[1]);
+							close(getfdr[2]);
+						}
+					}
+					pthread_mutex_unlock(&filepointer->file_mutex);
+				}
+
+				if (errors == NO_ERROR_YET) {
+					// open the official path and send
+
+					char *responseGet;
+                	responseGet = new char[500];
+
+					pthread_mutex_lock(&filepointer->file_mutex);
+
+					sendheader(commfd, responseGet, 200, filesize);
+
+					// get file contents
+					getfd = open(officialpath, O_RDONLY);
+					while(read(getfd, buf, sizeof(char))) {
+						send(commfd, buf, sizeof(char), 0);
+						memset(&buf, 0, sizeof(buf));
+					}
+
+					close(getfd);
+                	pthread_mutex_unlock(&filepointer->file_mutex);
+
+                	delete[] responseGet;
+				}
+
+			}
+		}	
+
+
+		/********************************************************** PUT WITHOUT REDUNDANCY **********************************************************/
 		
 		// handling PUT request
-		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR)) {
-	        
+        int putfd, n;
+		memset(&buf, 0, sizeof(buf));
+		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 0)) {
+            
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
+			//struct file_data* filepointer;
 
-			// create / overwrite new file in directory
-			putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-
-			if(ptrlength != NULL) {
+			if(ptrlength != NULL) {     // content length provided
 
 				// get content if Content-Length is provided
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
-				
-				char *responsePut = new char[SIZE + contentlength];
 
-				// 201 Created header
-				sendheader(commfd, responsePut, 201, contentlength);
+            	char *responsePut = new char[500];
 
-				// put specified length of contents into file
-				for(int i = 0; i < contentlength; i++) {
-					errno = recv(commfd, buf, sizeof(char), 0);
-					if(errno < 0) { err(1, "recv()"); }
-					if(errno == 0) { break; }
-					write(putfd, buf, sizeof(char));
-					memset(&buf, 0, sizeof(char));
-				}
+                if(shared->fileexists == 0) {          // content length provided and file doesn't exist
 
-				delete[] responsePut;
-			} else {
-			
-				// put content into file and get Content-Length
-				contentlength = recv(ses->commfd, buf, sizeof(buf), 0);
-				if(contentlength < 0) { err(1, "recv()"); }
-				write(putfd, buf, contentlength);
+                    pthread_mutex_lock(&shared->global_mutex);
 
-				char *responsePut = new char[SIZE + contentlength];
-				
-				// 201 Created header
-				sendheader(commfd, responsePut, 201, contentlength);
+                    struct file_data file_data;
+					strcpy(file_data.filename, filename);
+                    pthread_mutex_init(&file_data.file_mutex, NULL);
+                    shared->fdata.push_back(file_data);
 
-				delete[] responsePut;
+                    filepointer = (struct file_data*) &shared->fdata.back();
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+                    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfd);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
+
+				    delete[] responsePut;
+                }
+                else {      // content length provided and file exists already
+
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfd);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+
+				    delete[] responsePut;
+                }
+
+			} else {        // content length isn't provided
+
+                char *responsePut = new char[20000];
+                if (shared->fileexists == 0) {         // no content length and file doesn't exist
+
+                    pthread_mutex_lock(&shared->global_mutex);
+
+                    struct file_data file_data;
+					strcpy(file_data.filename, filename);
+                    pthread_mutex_init(&file_data.file_mutex, NULL);
+                    shared->fdata.push_back(file_data);
+
+                    filepointer = (struct file_data*) &shared->fdata.back();
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+
+				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				    sendheader(commfd, responsePut, 201, 0);
+
+				    while (1) {
+					    int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					    if (amtRcv == 0) {
+						    break;
+					    }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfd);
+
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
+
+				    delete[] responsePut;
+                }
+                else {              // no content length and file exists already
+
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+
+				    putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+				    sendheader(commfd, responsePut, 201, 0);
+
+				    while (1) {
+					    int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					    if (amtRcv == 0) {
+						    break;
+					    }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    write(putfd, buf, sizeof(char));
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfd);
+
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    delete[] responsePut;
+                }
+
 			}
-
-			// close putfd
-			close(putfd);
 		}
 
-		// close TCP connection
-		close(ses->commfd);
+		/********************************************************** PUT WITH REDUNDANCY **********************************************************/
+
+		int putfdr[3] = { 0 };
+		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET) && (shared->rflag == 1)) {
+            
+			// get Content-Length
+			char* ptrlength = strstr(header, "Content-Length:");
+
+			if(ptrlength != NULL) {     // content length provided
+
+				// get content if Content-Length is provided
+				sscanf(ptrlength, "Content-Length: %d", &contentlength);
+
+            	char *responsePut = new char[500];
+
+                if(shared->fileexists == 0) {          // content length provided and file doesn't exist
+
+                    pthread_mutex_lock(&shared->global_mutex);
+
+                    struct file_data file_data;
+					strcpy(file_data.filename, filename);
+                    pthread_mutex_init(&file_data.file_mutex, NULL);
+                    shared->fdata.push_back(file_data);
+
+                    filepointer = (struct file_data*) &shared->fdata.back();
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+                    char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
+
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
+
+				    delete[] responsePut;
+                }
+                else {      // content length provided and file exists already
+
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+					char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
+
+				    for(int i = contentlength; i > 0; i--) {
+					    n = recv(commfd, buf, sizeof(char), 0);
+					    if(n < 0) { warn("recv()"); }
+					    if(n == 0) { break; }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
+				    sendheader(commfd, responsePut, 201, 0);
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+
+				    delete[] responsePut;
+                }
+
+			} 
+			else {        // content length isn't provided
+
+                char *responsePut = new char[500];
+                if (shared->fileexists == 0) {         // no content length and file doesn't exist
+
+                    pthread_mutex_lock(&shared->global_mutex);
+
+                    struct file_data file_data;
+					strcpy(file_data.filename, filename);
+                    pthread_mutex_init(&file_data.file_mutex, NULL);
+                    shared->fdata.push_back(file_data);
+
+                    filepointer = (struct file_data*) &shared->fdata.back();
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+
+				    char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
+
+				    sendheader(commfd, responsePut, 201, 0);
+
+				    while (1) {
+					    int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					    if (amtRcv == 0) {
+						    break;
+					    }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
+
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    pthread_mutex_unlock(&shared->global_mutex);
+
+				    delete[] responsePut;
+                }
+                else {              // no content length and file exists already
+
+                    pthread_mutex_lock(&filepointer->file_mutex);
+
+
+				    char path[100];
+					for(int d = 0; d < 3; d++) {
+						sprintf(path, "copy%d/%s", d+1, filename);
+
+						// create / overwrite new file in directory
+						putfdr[d] = open(path, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					}
+				    sendheader(commfd, responsePut, 201, 0);
+
+				    while (1) {
+					    int amtRcv = recv(commfd, buf, sizeof(char), 0);
+					    if (amtRcv == 0) {
+						    break;
+					    }
+					    write(STDOUT_FILENO, buf, sizeof(char));
+					    for(int j = 0; j < 3; j++) {
+							n = write(putfdr[j], buf, sizeof(char));
+							if(n < 0) { err(1, "write()"); }
+						}
+					    memset(&buf, 0, sizeof(buf));
+				    }
+
+				    close(putfdr[0]);
+					close(putfdr[1]);
+					close(putfdr[2]);
+
+                    pthread_mutex_unlock(&filepointer->file_mutex);
+                    delete[] responsePut;
+                }
+
+			}
+		}
 
 		// clear buffers
-		memset(&buf, 0, sizeof(buf));
 		memset(&header, 0, sizeof(header));
 		memset(&headercpy, 0, sizeof(headercpy));
 		memset(&response, 0, sizeof(response));
+		
+        close(commfd);
 
-		// tell waiting producers they can now dispatch
-		pthread_cond_signal(&(client->dispatcher_cond));
-	}
+        pthread_mutex_lock(&shared->global_mutex);
+        shared->currentrequests--;
+        pthread_cond_signal(&shared->dispatcher_cond);
+        pthread_mutex_unlock(&shared->global_mutex);
+
+    }
 }
 
 int main(int argc, char* argv[]) {
 
-	struct sockaddr_in servaddr;
-	int opt;
-	int errno, port;
-	shared_data *client = new shared_data;
-	client->numthreads = 4; //default
-	//int redundancy;
+    // parse command line using getopt()
+    int opt, num_workers, redundancy;
+    redundancy = 0;
+    num_workers = DEFAULT_THREADS;
 
-	// check cmd arg # & get port
-	if(argc == 2) {
-		port = 80;
-	} else if(argc == 3) {
-		port = atoi(argv[2]);
-	} else {
-		char usage[] = "USAGE: ./httpserver <address> <port-number> [-N -r]\n";
-		write(STDOUT_FILENO, usage, sizeof(usage));
-		exit(0);
-	}
-
-    while((opt = getopt(argc, argv, "N:r")) != -1) {
+    while ((opt = getopt(argc, argv, "N:r")) != -1) {
         switch (opt) {
             case 'N':
-                client->numthreads = atoi(optarg);
+                num_workers = atoi(optarg);
                 break;
             case 'r':
-                //redundancy = 1;
-                printf("Option: %c\n", opt);
+                redundancy = 1;
                 break;
         }
     }
 
-	// init socket
-	client->sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if(client->sockfd < 0) { err(1, "socket()"); }
+    // bind sockets
+    struct sockaddr_in servaddr;
+    int listenfd, n, port;
 
-	// init address
-	memset(&servaddr, 0, sizeof(servaddr));
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = getaddr(argv[1]);
-	servaddr.sin_port = htons(port);
+    // init socket
+    listenfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listenfd < 0) { err(1, "socket()"); }
 
-	// socket bind
-	errno = bind(client->sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-	if(errno < 0) { err(1, "bind()"); }
+    // init address
+    port = 80;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = getaddr(argv[optind]);
+    if (argv[optind+1] != NULL) {
+        port = atoi(argv[optind+1]);
+    }
+    servaddr.sin_port = htons(port);
 
-	// socket listen
-	errno = listen(client->sockfd, 10);
-	if(errno < 0) { err(1, "listen()"); }
+    // socket bind
+    n = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
+    if (n < 0) { err(1, "bind()"); }
 
-	// initialize session mutex
-	pthread_mutex_init(&client->sessions_mutex, 0);
+    // socket listen
+    n = listen(listenfd, 10);
+    if (n < 0) { err(1, "listen()"); }
 
-	// create threads
-	pthread_t dispatcher_tid[1];
-	pthread_t worker_tid[SIZE];
-	pthread_create(&dispatcher_tid[0], 0, dispatcher, (void*)&client);
-	for(int i = 0; i < client->numthreads; i++) {
-		pthread_create(&worker_tid[i], 0, worker, (void*)&client);
+    // create struct to send to threads
+    struct shared_data common_data;
+    pthread_mutex_init(&common_data.global_mutex, NULL);
+    pthread_cond_init(&common_data.dispatcher_cond, NULL);
+    pthread_cond_init(&common_data.worker_cond, NULL);
+    common_data.rflag = redundancy;
+    common_data.sockfd = listenfd;
+    common_data.numthreads = num_workers;
+    common_data.currentrequests = 0;
+    common_data.servaddr = servaddr;
+
+    // go through each file in directory and make a lock
+    struct dirent *dp;
+    DIR *pdir = opendir("./");
+	
+	if (redundancy == 0) {
+    	while ((dp = readdir(pdir)) != NULL) {
+
+        	if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..") ||
+        		!strcmp(dp->d_name, "copy1") || !strcmp(dp->d_name, "copy2") ||
+        		!strcmp(dp->d_name, "copy3") || !strcmp(dp->d_name, "client")) { }
+        	else {
+            	char file_name[100];
+				strcpy(file_name, dp->d_name);
+            	struct file_data filedata;
+				strcpy(filedata.filename, file_name);
+            	pthread_mutex_init(&filedata.file_mutex, NULL);
+				common_data.fdata.push_back(filedata);
+        	}
+    	}
+
 	}
+	else if (redundancy == 1) {
+		pdir = opendir("copy1");
+        while ((dp = readdir(pdir)) != NULL) {
 
-	sleep(10);
-	pthread_mutex_destroy(&(client->sessions_mutex));
-	pthread_cond_destroy(&(client->dispatcher_cond));
-	pthread_cond_destroy(&(client->worker_cond));
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..") ||
+        		!strcmp(dp->d_name, "copy1") || !strcmp(dp->d_name, "copy2") ||
+        		!strcmp(dp->d_name, "copy3") || !strcmp(dp->d_name, "client")) {
+                // do nothing
+            }
+            else {
+                char* file_name = dp->d_name;
 
-	exit(0);
+                struct file_data filedata;
+				strcpy(filedata.filename, file_name);
+                pthread_mutex_init(&filedata.file_mutex, NULL);
+                common_data.fdata.push_back(filedata);
+                printf("copy1: %s\n", file_name);
+            }
+        }
+
+        pdir = opendir("copy2");
+        while ((dp = readdir(pdir)) != NULL) {
+
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..") ||
+        		!strcmp(dp->d_name, "copy1") || !strcmp(dp->d_name, "copy2") ||
+        		!strcmp(dp->d_name, "copy3") || !strcmp(dp->d_name, "client")) {    // if is it . or .. files
+                // do nothing
+            }
+            else {      // actual files
+                char* file_name = dp->d_name;
+
+                int alreadyexists = 0;
+                for (std::vector<file_data>::iterator i = common_data.fdata.begin(); i != common_data.fdata.end(); ++i) {
+                    if ((strcmp(file_name, i->filename)) == 0) {        // file already has a lock
+                        alreadyexists = 1;
+                        break;
+                    }
+                }
+                if (alreadyexists == 1) {
+                    // do nothing
+                }
+                else {
+                    struct file_data filedata;
+                    strcpy(filedata.filename, file_name);
+                    pthread_mutex_init(&filedata.file_mutex, NULL);
+                    common_data.fdata.push_back(filedata);
+                    printf("copy2: %s\n", file_name);
+                }
+            }
+        }
+
+        pdir = opendir("copy3");
+        while ((dp = readdir(pdir)) != NULL) {
+
+            if (!strcmp(dp->d_name, ".") || !strcmp(dp->d_name, "..") ||
+        		!strcmp(dp->d_name, "copy1") || !strcmp(dp->d_name, "copy2") ||
+        		!strcmp(dp->d_name, "copy3") || !strcmp(dp->d_name, "client")) {    // if is it . or .. files
+                // do nothing
+            }
+            else {      // actual files
+                char* file_name = dp->d_name;
+
+                int alreadyexists = 0;
+                for (std::vector<file_data>::iterator i = common_data.fdata.begin(); i != common_data.fdata.end(); ++i) {
+                    if ((strcmp(file_name, i->filename)) == 0) {        // file already has a lock
+                        alreadyexists = 1;
+                        break;
+                    }
+                }
+                if (alreadyexists == 1) {
+                    // do nothing
+                }
+                else {
+                    struct file_data filedata;
+                    strcpy(filedata.filename, file_name);
+                    pthread_mutex_init(&filedata.file_mutex, NULL);
+                    common_data.fdata.push_back(filedata);
+                    printf("copy3: %s\n", file_name);
+                }
+            }
+        }
+
+	}
+    closedir(pdir);
+
+    // create pthreads
+    pthread_t worker_tid[SIZE];
+
+    for (int i = 0; i < num_workers; ++i) {
+        pthread_create(&worker_tid[i], NULL, &worker, &common_data);
+    }
+
+    // dispatcher thread
+
+    while (1) {
+
+        pthread_mutex_lock(&common_data.global_mutex);
+        while (common_data.currentrequests >= common_data.numthreads) {
+            pthread_cond_wait(&common_data.dispatcher_cond, &common_data.global_mutex);
+        }
+        pthread_mutex_unlock(&common_data.global_mutex);
+
+        char waiting[] = "\nWaiting for connection...\n";
+		write(STDOUT_FILENO, waiting, strlen(waiting));
+		int servaddr_length = sizeof(servaddr);
+		int commfd = accept(listenfd, (struct sockaddr*)&(servaddr), (socklen_t*)&servaddr_length);
+		if(commfd < 0) {
+			warn("accept()");
+			continue;
+		}
+		struct sessions request;
+        request.commfd = commfd;
+        pthread_mutex_lock(&common_data.global_mutex);
+        common_data.session_queue.push(request);
+        common_data.currentrequests++;
+
+        pthread_cond_signal(&common_data.worker_cond);
+        pthread_mutex_unlock(&common_data.global_mutex);
+    }
+
 }
