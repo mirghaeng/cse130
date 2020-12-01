@@ -27,14 +27,14 @@ httpserver.cpp (\*edit) \
 	&ensp;&ensp;&ensp;in ASCII. A user can specify number of threads and/or to enable redundancy. \
 	&ensp;&ensp;&ensp;If no number of threads is specified, the program will use 4 threads. \
 	&ensp;&ensp;&ensp;If redundancy is enabled, the program will only work with the files in \
-	&ensp;&ensp;&ensp;copy1, copy2, and copy3. \
+	&ensp;&ensp;&ensp;copy1, copy2, and copy3 so there will be 3 copies of each file.\
 	&ensp;&ensp;&ensp;In response to a GET request from a client, httpserver will \
 	&ensp;&ensp;&ensp;detect a file name, read the file contents, write the associated HTTP \
 	&ensp;&ensp;&ensp;response header, and, if appropriate, the associated content to stdout \
 	&ensp;&ensp;&ensp;on the client side. In response to a PUT request from a client, \
 	&ensp;&ensp;&ensp;httpserver will also take data from the request then create or \
 	&ensp;&ensp;&ensp;overwrite the client specified file to put into the server directory \
-	&ensp;&ensp;&ensp;and write the associated HTTP response header on the client side \
+	&ensp;&ensp;&ensp;and write the associated HTTP response header on the client side
 
 
 DESIGN.pdf  
