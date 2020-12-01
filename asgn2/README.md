@@ -5,10 +5,10 @@ November 30, 2020
 
 To run httpserver:  
 	&ensp;&ensp;&ensp;make  
-	&ensp;&ensp;&ensp;./httpserver <address> <port-number> [options]
+	&ensp;&ensp;&ensp;./httpserver &lt;address&gt; &lt;port-number&gt; [options]
 	&ensp;&ensp;&ensp;options:
-	&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;-N to set number of threads
-	&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;-r to enable redundancy
+	  -N to set number of threads
+	  -r to enable redundancy
 
 Example run:  
 	&ensp;&ensp;&ensp;./httpserver localhost 8080
@@ -21,7 +21,7 @@ Limitations or known issues
 
 -------------------------------------------------
 
-httpserver.cpp   (***************edit**************)
+httpserver.cpp   (\*edit)
 	&ensp;&ensp;&ensp;This program implements a single-threaded HTTP server that responds  
 	&ensp;&ensp;&ensp;to GET and PUT commands to read and write files named by 10-characters  
 	&ensp;&ensp;&ensp;in ASCII. In response to a GET request from a client, httpserver will  
