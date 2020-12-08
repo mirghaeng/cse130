@@ -11,6 +11,7 @@
 #include <err.h>
 #include <time.h>
 #include <dirent.h>
+#include <errno.h>
 
 #define SIZE 10000
 
@@ -48,15 +49,15 @@ unsigned long getaddr(char *name) {
 
 void sendheader(int commfd, char* response, int code, int length) {
 	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
-	int errno = send(commfd, response, strlen(response), 0);
-	if(errno < 0) { warn("send()"); }
+	int er = send(commfd, response, strlen(response), 0);
+	if(er < 0) { warn("send()"); }
 }
 
 int main(int argc, char* argv[]) {
 
 	struct sockaddr_in servaddr;
 	struct stat st;
-	int listenfd, errno, port;
+	int listenfd, er, port;
 	int servaddr_length, commfd;
 	int getfd, filesize;
 	int putfd, contentlength;
@@ -83,12 +84,12 @@ int main(int argc, char* argv[]) {
 	servaddr.sin_port = htons(port);
 
 	// socket bind
-	errno = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-	if(errno < 0) { err(1, "bind()"); }
+	er = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
+	if(er < 0) { err(1, "bind()"); }
 
 	// socket listen
-	errno = listen(listenfd, 10);
-	if(errno < 0) { err(1, "listen()"); } 
+	er = listen(listenfd, 10);
+	if(er < 0) { err(1, "listen()"); } 
 
 	while(1) {
 
@@ -184,6 +185,10 @@ int main(int argc, char* argv[]) {
 					    if(dp->d_type == DT_DIR) { continue; }
 
 					    sprintf(d, "./%s/%s", b, dp->d_name);
+
+                        // ignore if backup file doesn't have reading access or main directory file doesn't have writing access
+                        if (access(d, R_OK) == -1 || access(dp->d_name, W_OK) == -1) { continue; }
+
 					    infd = open(d, O_RDONLY);
 					    getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
@@ -195,9 +200,10 @@ int main(int argc, char* argv[]) {
 					    close(getfd);
 				    }
                     sendheader(commfd, response, 200, 0);
-                }
-                else {
-                    sendheader(commfd, response, 404, 0);
+                } else if (ENOENT == errno) { 
+                    sendheader(commfd, response, 404, 0); 
+                } else if (EACCES == errno) {
+                    sendheader(commfd, response, 403, 0);
                 }
 				closedir(pdir_r);
 
@@ -232,24 +238,32 @@ int main(int argc, char* argv[]) {
 				    sprintf(maxstring, "%d", max);
 				    strcat(b, maxstring);
 				    DIR *pdir_r = opendir(b);
-				    while((dp = readdir(pdir_r)) != NULL) {
+                    if (pdir_r) {
+				        while((dp = readdir(pdir_r)) != NULL) {
 
-					    // ignore non backup directories
-					    if(dp->d_type == DT_DIR) { continue; }
+					        // ignore non backup directories
+					        if(dp->d_type == DT_DIR) { continue; }
 
-					    sprintf(d, "./%s/%s", b, dp->d_name);
-					    infd = open(d, O_RDONLY);
-					    getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					        sprintf(d, "./%s/%s", b, dp->d_name);
 
-					    while(read(infd, buf, sizeof(char)) > 0) {
-						    write(getfd, buf, sizeof(char));
-						    memset(&buf, 0, sizeof(buf));
-					    }
-					    close(infd);
-					    close(getfd);
-				    }
-				    closedir(pdir_r);
-                    sendheader(commfd, response, 200, 0);
+                            // ignore if backup file doesn't have reading access or main directory file doesn't have writing access
+                            if (access(d, R_OK) == -1 || access(dp->d_name, W_OK) == -1) { continue; }
+
+					        infd = open(d, O_RDONLY);
+					        getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+					        while(read(infd, buf, sizeof(char)) > 0) {
+						        write(getfd, buf, sizeof(char));
+						        memset(&buf, 0, sizeof(buf));
+					        }
+					        close(infd);
+					        close(getfd);
+				        }
+                        sendheader(commfd, response, 200, 0);
+                    } else if (EACCES == errno) {
+                        sendheader(commfd, response, 403, 0);
+                    }
+                    closedir(pdir_r);
                 }
                 else {
                     sendheader(commfd, response, 404, 0);
@@ -383,9 +397,9 @@ int main(int argc, char* argv[]) {
 
 				// put specified length of contents into file
 				for(int i = 0; i < contentlength; i++) {
-					errno = recv(commfd, buf, sizeof(char), 0);
-					if(errno < 0) { err(1, "recv()"); }
-					if(errno == 0) { break; }
+					er = recv(commfd, buf, sizeof(char), 0);
+					if(er < 0) { err(1, "recv()"); }
+					if(er == 0) { break; }
 					write(putfd, buf, sizeof(char));
 					memset(&buf, 0, sizeof(char));
 				}
