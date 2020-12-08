@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
 		char header[SIZE];
 		char headercpy[SIZE];
 		char response[SIZE];
-		char *end_of_header, *type, *filename;
+		char *end_of_header, *type, *path;
 		int errors = NO_ERROR;
 
 		// socket accept
@@ -123,13 +123,15 @@ int main(int argc, char* argv[]) {
 		type = strtok(headercpy, " ");
 		
 		// get filename
-		filename = strtok(NULL, " ");
-		filename++;
+		path = strtok(NULL, " ");
+		path++;
 
-		//char* timestamp = strtok(NULL, "/");
+		// get timestamp
+		char *filename = strtok(path, "/");
+		char *timestamp = strtok(NULL, "/");
 		
 		// check filename length
-		if(strlen(filename) != 10 && strcmp(filename, "b")!=0 && strcmp(filename, "r")!=0) {
+		if(strlen(filename) != 10 && strcmp(filename, "b")!=0 && strcmp(filename, "r")!=0 && strcmp(filename, "l")!=0) {
 
 			// 400 Bad Request
 			errors = ERROR;
@@ -166,7 +168,7 @@ int main(int argc, char* argv[]) {
 		// handling GET request	
 		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR)) {
 
-			/*if(strcmp(filename, "r")==0 && timestamp!=NULL) {
+			if(strcmp(filename, "r")==0 && timestamp!=NULL) {
 				struct dirent *dp;
 				int infd;
 				char d[500];
@@ -188,9 +190,8 @@ int main(int argc, char* argv[]) {
 				}
 				closedir(pdir_r);
 				sendheader(commfd, response, 200, 0);
-			} else */if(strcmp(filename, "r")==0) {
+			} else if(strcmp(filename, "r")==0) {
 
-				//
 				struct dirent *dp;
 				DIR *pdir = opendir("./");
 				int max = 0;
@@ -265,6 +266,24 @@ int main(int argc, char* argv[]) {
 				}
 				closedir(pdir);
 				sendheader(commfd, response, 200, 0);
+			} else if(strcmp(filename, "l")==0) {
+				sendheader(commfd, response, 200, 0);
+				struct dirent *dp_main;
+				DIR *pdir_main = opendir("./");
+				while((dp_main = readdir(pdir_main)) != NULL) {
+					if(strstr(dp_main->d_name, "backup-") == NULL) { continue; }
+					printf("directory: %s\n", dp_main->d_name);
+					//send(commfd, dp_main->d_name, strlen(dp_main->d_name), 0);
+					struct dirent *dp;
+					DIR *pdir_r = opendir(dp_main->d_name);
+					while((dp = readdir(pdir_r)) != NULL) {
+						if(dp->d_type == DT_DIR) { continue; }
+						printf("file: %s\n", dp->d_name);
+					}
+					printf("\n");
+					closedir(pdir_r);
+				}
+				closedir(pdir_main);
 			} else if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
