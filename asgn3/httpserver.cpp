@@ -9,6 +9,8 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <err.h>
+#include <time.h>
+#include <dirent.h>
 
 #define ERROR 1
 #define NO_ERROR_YET 0
@@ -127,28 +129,33 @@ int main(int argc, char* argv[]) {
 		
 		// check filename length
         char *recoverypointer = strstr(header, "/r/");
-        char *timestamp;
+        char timestamp[10];
 
         if ((strcmp(filename, "b") == 0) && (strcmp(type, "GET") == 0)) {
             bflag = 1;
+            printf("Bflag: %d\n", bflag);
         }
         else if ((strcmp(filename, "r") == 0) && (strcmp(type, "GET") == 0)) {
             rflag = 1;
+            printf("Rflag: %d\n", rflag);
         }
         else if ((recoverypointer != NULL) && (strcmp(type, "GET") == 0)) {
-            sscanf(recoverypointer, "/r/%s", &timestamp);
-            for (char* i = timestamp; *i != '\0'; i++) {
-                    if ((isdigit(*i) == 0) && (errors == NO_ERROR_YET)) {
+            sscanf(recoverypointer, "/r/%s", timestamp);
+
+            for (int i = 0; i < (int)strlen(timestamp); i++) {
+                    if ((isdigit(timestamp[i]) == 0) && (errors == NO_ERROR_YET)) {
                         errors = ERROR;
                         sendheader(commfd, response, 400, 0);
                     }
             }
-            if (errors != ERROR) {
+            if (errors == NO_ERROR_YET) {
                 r2flag = 1; 
+                printf("R2flag: %d\nTimestamp: %s\n", r2flag, timestamp);
             }
         }
         else if ((strcmp(filename, "l") == 0) && (strcmp(type, "GET") == 0)) {
             lflag = 1;
+            printf("Lflag: %d\n", lflag);
         }
 		else if (strlen(filename) != 10) {
 			// 400 Bad Request
@@ -188,34 +195,94 @@ int main(int argc, char* argv[]) {
 		// handling GET request	
 		memset(&buf, 0, sizeof(buf));
 		if ((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
-			if (access(filename, F_OK) == -1) {
+            if (bflag == 1) {
+                // get time and create directory
+                char directoryname[20];
+                time_t currenttime = time(NULL);
+                int time = static_cast<int> (currenttime);
+                sprintf(directoryname, "backup-%d", time);
+                mkdir(directoryname, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 
-				// 404 File Not Found
-				errors = ERROR;
-				sendheader(commfd, response, 404, 0);
-			} 
-            else if (access(filename, R_OK) == -1) {
+                // go through current directory and copy files
+                struct dirent *dp;
+                DIR *pdir = opendir("./");
+                while ((dp = readdir(pdir)) != NULL) {
 
-				// 403 Forbidden
-				errors = ERROR;
-				sendheader(commfd, response, 403, 0);
-			} 
-            else {
+                    // check for file name length and alnum
+                    char file_name[100];
+				    strcpy(file_name, dp->d_name);
+                    if ((strlen(file_name) == 10) && (strcmp(file_name, "httpserver") != 0)) {
+                        int notalnum = 0;
+                        for (int i = 0; i < 10; i++) {
+                            if (isalnum(file_name[i]) == 0) {
+                                notalnum = 1;
+                                break;
+                            }
+                        }
 
-				// get file size
-				stat(filename, &st);
-				filesize = st.st_size;
+                        if (notalnum == 0) {
+                            // copy the file into the backup
+                            char copyfile[100];
+                            sprintf(copyfile, "%s/%s", directoryname, file_name);
+                            printf("%s\n", copyfile);
+                            int copyfd = open(copyfile, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+                            getfd = open(file_name, O_RDONLY);
 
-				sendheader(commfd, response, 200, filesize);
+				            while(read(getfd, buf, sizeof(char))) {
+					            write(copyfd, buf, sizeof(char));
+					            memset(&buf, 0, sizeof(buf));
+				            }
 
-				// get file contents
-				getfd = open(filename, O_RDONLY);
-				while(read(getfd, buf, sizeof(char))) {
-					send(commfd, buf, sizeof(char), 0);
-					memset(&buf, 0, sizeof(buf));
-				}
-				close(getfd);
-			}
+				            close(getfd);
+                            close(copyfd);
+                        }
+                    }
+
+                }
+                closedir(pdir);
+                sendheader(commfd, response, 200, 0);
+
+            }
+            else if (rflag == 1) {
+                // do recovery code
+            }
+            else if (r2flag == 1) {
+                // check if the timestamp exists
+                // do specific recovery code
+            }
+            else if (lflag == 1) {
+                // send list of backups
+            }
+            else {                                      // normal GET operation
+			    if (access(filename, F_OK) == -1) {
+
+				    // 404 File Not Found
+				    errors = ERROR;
+				    sendheader(commfd, response, 404, 0);
+			    } 
+                else if (access(filename, R_OK) == -1) {
+
+				    // 403 Forbidden
+				    errors = ERROR;
+				    sendheader(commfd, response, 403, 0);
+			    } 
+                else {
+
+				    // get file size
+				    stat(filename, &st);
+				    filesize = st.st_size;
+
+				    sendheader(commfd, response, 200, filesize);
+
+				    // get file contents
+				    getfd = open(filename, O_RDONLY);
+				    while(read(getfd, buf, sizeof(char))) {
+					    send(commfd, buf, sizeof(char), 0);
+					    memset(&buf, 0, sizeof(buf));
+				    }
+				    close(getfd);
+			    }
+            }
 		}		
 		
 		// handling PUT request
