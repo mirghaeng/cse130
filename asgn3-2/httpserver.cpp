@@ -125,6 +125,8 @@ int main(int argc, char* argv[]) {
 		// get filename
 		filename = strtok(NULL, " ");
 		filename++;
+
+		//char* timestamp = strtok(NULL, "/");
 		
 		// check filename length
 		if(strlen(filename) != 10 && strcmp(filename, "b")!=0 && strcmp(filename, "r")!=0) {
@@ -164,7 +166,29 @@ int main(int argc, char* argv[]) {
 		// handling GET request	
 		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR)) {
 
-			if(strcmp(filename, "r")==0) {
+			/*if(strcmp(filename, "r")==0 && timestamp!=NULL) {
+				struct dirent *dp;
+				int infd;
+				char d[500];
+				char b[100] = "backup-";
+				strcat(b, timestamp);
+				DIR *pdir_r = opendir(b);
+				while((dp = readdir(pdir_r)) != NULL) {
+					printf("%s\n", dp->d_name);
+					if(dp->d_type == DT_DIR) { printf("hit\n"); continue; }
+					sprintf(d, "./%s/%s", b, dp->d_name);
+					infd = open(d, O_RDONLY);
+					getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					while(read(infd, buf, sizeof(char)) > 0) {
+						write(getfd, buf, sizeof(char));
+						memset(&buf, 0, sizeof(buf));
+					}
+					close(infd);
+					close(getfd);
+				}
+				closedir(pdir_r);
+				sendheader(commfd, response, 200, 0);
+			} else */if(strcmp(filename, "r")==0) {
 
 				//
 				struct dirent *dp;
@@ -176,7 +200,7 @@ int main(int argc, char* argv[]) {
 						printf("file: %s, hit!\n", dp->d_name);
 						char *f = dp->d_name;
 						printf("numbers: %s\n", f);
-						f += 8;
+						f += 7;
 						current = atoi(f);
 						printf("current: %d\n", current);
 						if(current > max) { max = current; }
@@ -188,10 +212,11 @@ int main(int argc, char* argv[]) {
 				// copy to main directory
 				int infd;
 				char d[500];
-				char b[100] = "backup-";
+				char b[100] = "./backup-";
 				char maxstring[100];
 				sprintf(maxstring, "%d", max);
 				strcat(b, maxstring);
+				printf("b: %s\n", b);
 				DIR *pdir_r = opendir(b);
 				while((dp = readdir(pdir_r)) != NULL) {
 					printf("%s\n", dp->d_name);
