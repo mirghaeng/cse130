@@ -129,16 +129,16 @@ int main(int argc, char* argv[]) {
         char *recoverypointer = strstr(header, "/r/");
         char *timestamp;
 
-        if (strcmp(filename, "b") == 0) {
+        if ((strcmp(filename, "b") == 0) && (strcmp(type, "GET") == 0)) {
             bflag = 1;
         }
-        else if (strcmp(filename, "r") == 0) {
+        else if ((strcmp(filename, "r") == 0) && (strcmp(type, "GET") == 0)) {
             rflag = 1;
         }
-        else if (recoverypointer != NULL) {
+        else if ((recoverypointer != NULL) && (strcmp(type, "GET") == 0)) {
             sscanf(recoverypointer, "/r/%s", &timestamp);
             for (char* i = timestamp; *i != '\0'; i++) {
-                    if (isdigit(*i) == 0) {
+                    if ((isdigit(*i) == 0) && (errors == NO_ERROR_YET)) {
                         errors = ERROR;
                         sendheader(commfd, response, 400, 0);
                     }
@@ -147,24 +147,26 @@ int main(int argc, char* argv[]) {
                 r2flag = 1; 
             }
         }
-        else if (strcmp(filename, "l") == 0) {
+        else if ((strcmp(filename, "l") == 0) && (strcmp(type, "GET") == 0)) {
             lflag = 1;
         }
-		if (strlen(filename) != 10) {
+		else if (strlen(filename) != 10) {
 			// 400 Bad Request
 			errors = ERROR;
 			sendheader(commfd, response, 400, 0);
 		}
 		
 		// check filename is alphanumeric
-		for (char* i = filename; *i != '\0'; i++) {
-			if ((isalnum(*i) == 0) && (errors == NO_ERROR_YET)) {
+        if ((bflag == 0) && (rflag == 0) && (r2flag == 0) && (lflag == 0)) {
+		    for (char* i = filename; *i != '\0'; i++) {
+			    if ((isalnum(*i) == 0) && (errors == NO_ERROR_YET)) {
 
-				// 400 Bad Request
-				errors = ERROR;
-				sendheader(commfd, response, 400, 0);
-			}
-		}
+				    // 400 Bad Request
+				    errors = ERROR;
+				    sendheader(commfd, response, 400, 0);
+			    }
+		    }
+        }
 
 		// check for HTTP/1.1
 		char* ptrhttp = strstr(header, "HTTP/1.1");
@@ -204,9 +206,6 @@ int main(int argc, char* argv[]) {
 				stat(filename, &st);
 				filesize = st.st_size;
 
-                //char *responseGet;
-                //responseGet = new char[filesize+10000];
-
 				sendheader(commfd, response, 200, filesize);
 
 				// get file contents
@@ -216,8 +215,6 @@ int main(int argc, char* argv[]) {
 					memset(&buf, 0, sizeof(buf));
 				}
 				close(getfd);
-
-                //delete[] responseGet;
 			}
 		}		
 		
@@ -233,8 +230,6 @@ int main(int argc, char* argv[]) {
 				// get content if Content-Length is provided
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
 
-            	//char *responsePut = new char[contentlength+10000];
-
 				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
 				for (int i = contentlength; i > 0; i--) {
@@ -249,14 +244,11 @@ int main(int argc, char* argv[]) {
 				close(putfd);
 
 				sendheader(commfd, response, 201, 0);
-				//delete[] responsePut;
 
 			} 
             else {
 				
 				// // get content if Content-Length is not provided
-
-                //char *responsePut = new char[20000];
 
 				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 				sendheader(commfd, response, 201, 0);
@@ -272,8 +264,6 @@ int main(int argc, char* argv[]) {
 				}
 
 				close(putfd);
-
-				//delete[] responsePut;
 
 			}
 		}
