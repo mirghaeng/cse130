@@ -12,8 +12,10 @@
 #include <time.h>
 #include <dirent.h>
 
+#define SIZE 10000
+
 #define ERROR 1
-#define NO_ERROR_YET 0
+#define NO_ERROR 0
 
 const char* getStatus(int code) {
 	switch(code) {
@@ -45,30 +47,29 @@ unsigned long getaddr(char *name) {
 }
 
 void sendheader(int commfd, char* response, int code, int length) {
-	sprintf(response, "\nHTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
+	sprintf(response, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", code, getStatus(code), length);
 	int errno = send(commfd, response, strlen(response), 0);
-	if (errno < 0) { warn("send()"); }
+	if(errno < 0) { warn("send()"); }
 }
 
 int main(int argc, char* argv[]) {
 
 	struct sockaddr_in servaddr;
 	struct stat st;
-	int listenfd, n, port;
+	int listenfd, errno, port;
 	int servaddr_length, commfd;
 	int getfd, filesize;
 	int putfd, contentlength;
 	
 	// check cmd arg # & get port
-	if (argc == 2) {
+	if(argc == 2) {
 		port = 80;
-	} 
-    else if (argc == 3) {
+	} else if(argc == 3) {
 		port = atoi(argv[2]);
-	} 
-    else {
+	} else {
 		char usage[] = "USAGE: ./httpserver <address> <port-number>\n";
-		write(STDOUT_FILENO, usage, sizeof(char));
+		write(STDOUT_FILENO, usage, sizeof(usage));
+		exit(0);
 	}
 
 	// init socket
@@ -82,38 +83,34 @@ int main(int argc, char* argv[]) {
 	servaddr.sin_port = htons(port);
 
 	// socket bind
-	n = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-	if(n < 0) { err(1, "bind()"); }
+	errno = bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
+	if(errno < 0) { err(1, "bind()"); }
 
 	// socket listen
-	n = listen(listenfd, 10);
-	if(n < 0) { err(1, "listen()"); } 
+	errno = listen(listenfd, 10);
+	if(errno < 0) { err(1, "listen()"); } 
 
-	while (1) {
+	while(1) {
 
-		char buf[100];
-		char header[5000];
-		char headercpy[5000];
-		char response[500];       // initialize to size of content + 10000 for the header
-		char *end_of_header, *type, *filename;
-		int errors = NO_ERROR_YET;
-        int bflag = 0;
-        int rflag = 0;
-        int r2flag = 0;
-        int lflag = 0;
+		char buf[SIZE];
+		char header[SIZE];
+		char headercpy[SIZE];
+		char response[SIZE];
+		char *end_of_header, *type, *path;
+		int errors = NO_ERROR;
 
 		// socket accept
-		char waiting[] = "\nWaiting for connection...\n";
+		char waiting[] = "Waiting for connection...\n";
 		write(STDOUT_FILENO, waiting, strlen(waiting));
 		servaddr_length = sizeof(servaddr);
 		commfd = accept(listenfd, (struct sockaddr*)&servaddr, (socklen_t*)&servaddr_length);
-		if (commfd < 0) {
+		if(commfd < 0) {
 			warn("accept()");
 			continue;
 		}
 		
 		// socket read request
-		while (recv(commfd, buf, sizeof(char), 0) > 0) {
+		while(recv(commfd, buf, sizeof(char), 0) > 0) {
 			write(STDOUT_FILENO, buf, sizeof(char));
 			strcat(header, buf);
 			end_of_header = strstr(header, "\r\n\r\n");
@@ -126,240 +123,286 @@ int main(int argc, char* argv[]) {
 		type = strtok(headercpy, " ");
 		
 		// get filename
-		filename = strtok(NULL, " ");
-		filename++;
+		path = strtok(NULL, " ");
+		path++;
+
+		// get timestamp
+		char *filename = strtok(path, "/");
+		char *timestamp = strtok(NULL, "/");
 		
 		// check filename length
-        char *recoverypointer = strstr(header, "/r/");
-        char timestamp[10];
+		if(strlen(filename) != 10 && strcmp(filename, "b")!=0 && strcmp(filename, "r")!=0 && strcmp(filename, "l")!=0) {
 
-        if ((strcmp(filename, "b") == 0) && (strcmp(type, "GET") == 0)) {
-            bflag = 1;
-            printf("Bflag: %d\n", bflag);
-        }
-        else if ((strcmp(filename, "r") == 0) && (strcmp(type, "GET") == 0)) {
-            rflag = 1;
-            printf("Rflag: %d\n", rflag);
-        }
-        else if ((recoverypointer != NULL) && (strcmp(type, "GET") == 0)) {
-            sscanf(recoverypointer, "/r/%s", timestamp);
-
-            for (int i = 0; i < (int)strlen(timestamp); i++) {
-                    if ((isdigit(timestamp[i]) == 0) && (errors == NO_ERROR_YET)) {
-                        errors = ERROR;
-                        sendheader(commfd, response, 400, 0);
-                    }
-            }
-            if (errors == NO_ERROR_YET) {
-                r2flag = 1; 
-                printf("R2flag: %d\nTimestamp: %s\n", r2flag, timestamp);
-            }
-        }
-        else if ((strcmp(filename, "l") == 0) && (strcmp(type, "GET") == 0)) {
-            lflag = 1;
-            printf("Lflag: %d\n", lflag);
-        }
-		else if (strlen(filename) != 10) {
 			// 400 Bad Request
 			errors = ERROR;
 			sendheader(commfd, response, 400, 0);
 		}
 		
 		// check filename is alphanumeric
-        if ((bflag == 0) && (rflag == 0) && (r2flag == 0) && (lflag == 0)) {
-		    for (char* i = filename; *i != '\0'; i++) {
-			    if ((isalnum(*i) == 0) && (errors == NO_ERROR_YET)) {
+		for(char* i = filename; *i != '\0'; i++) {
+			if((isalnum(*i) == 0) && (errors == NO_ERROR)) {
 
-				    // 400 Bad Request
-				    errors = ERROR;
-				    sendheader(commfd, response, 400, 0);
-			    }
-		    }
-        }
+				// 400 Bad Request
+				errors = ERROR;
+				sendheader(commfd, response, 400, 0);
+			}
+		}
 
 		// check for HTTP/1.1
 		char* ptrhttp = strstr(header, "HTTP/1.1");
-		if ((ptrhttp == NULL) && (errors == NO_ERROR_YET)) {
+		if((ptrhttp == NULL) && (errors == NO_ERROR)) {
 
 			// 400 Bad Request
 			errors = ERROR;
 			sendheader(commfd, response, 400, 0);
 		}
 
-		// check for other HTTP/1.1 methods
-		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR_YET)) {
+		// restrict HTTP/1.1 methods to GET & PUT
+		if (((strcmp(type, "GET") != 0) && (strcmp(type, "PUT") != 0)) && (errors == NO_ERROR)) {
 
 			// 500 Internal Service Error
 			errors = ERROR;
 			sendheader(commfd, response, 500, 0);
-        }
-	
+		}
+
 		// handling GET request	
-		memset(&buf, 0, sizeof(buf));
-		if ((strcmp(type, "GET") == 0) && (errors == NO_ERROR_YET)) {
-            if (bflag == 1) {
-                // get time and create directory
-                char directoryname[20];
-                time_t currenttime = time(NULL);
-                int time = static_cast<int> (currenttime);
-                sprintf(directoryname, "backup-%d", time);
-                mkdir(directoryname, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR)) {
 
-                // go through current directory and copy files
-                struct dirent *dp;
-                DIR *pdir = opendir("./");
-                while ((dp = readdir(pdir)) != NULL) {
+			if(strcmp(filename, "r")==0 && timestamp!=NULL) {
 
-                    // check for file name length and alnum
-                    char file_name[100];
-				    strcpy(file_name, dp->d_name);
-                    if ((strlen(file_name) == 10) && (strcmp(file_name, "httpserver") != 0)) {
-                        int notalnum = 0;
-                        for (int i = 0; i < 10; i++) {
-                            if (isalnum(file_name[i]) == 0) {
-                                notalnum = 1;
-                                break;
-                            }
-                        }
+				// recover specified backup file
+				struct dirent *dp;
+				int infd;
+				char d[500];
+				char b[100] = "backup-";
+				strcat(b, timestamp);
+				DIR *pdir_r = opendir(b);
+                if (pdir_r) {
+				    while((dp = readdir(pdir_r)) != NULL) {
 
-                        if (notalnum == 0) {
-                            // copy the file into the backup
-                            char copyfile[100];
-                            sprintf(copyfile, "%s/%s", directoryname, file_name);
-                            printf("%s\n", copyfile);
-                            int copyfd = open(copyfile, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-                            getfd = open(file_name, O_RDONLY);
+					    // ignore non backup directories
+					    if(dp->d_type == DT_DIR) { continue; }
 
-				            while(read(getfd, buf, sizeof(char))) {
-					            write(copyfd, buf, sizeof(char));
-					            memset(&buf, 0, sizeof(buf));
-				            }
+					    sprintf(d, "./%s/%s", b, dp->d_name);
+					    infd = open(d, O_RDONLY);
+					    getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
-				            close(getfd);
-                            close(copyfd);
-                        }
-                    }
-
-                }
-                closedir(pdir);
-                sendheader(commfd, response, 200, 0);
-
-            }
-            else if (rflag == 1) {
-                // do recovery code
-                // 
-            }
-            else if (r2flag == 1) {
-                // check if the timestamp exists
-                // do specific recovery code
-            }
-            else if (lflag == 1) {
-                // send list of backups
-                char alltimestamps[5000];
-                struct dirent *dp;
-                DIR *pdir = opendir("./");
-                while ((dp = readdir(pdir)) != NULL) {
-                    if (dp->d_type == DT_DIR) {
-                        printf("%s\n", dp->d_name);
-                        char ts[10];
-                        char *dirpointer = strstr(dp->d_name, "backup-");
-                        if (dirpointer != NULL) {
-                            sscanf(dp->d_name, "backup-%s", ts);
-                            printf("%s\n", ts);
-                            sprintf(ts, "%s\n", ts);
-                            strcat(alltimestamps, ts);
-                        }
-                        
-                    }
-                }
-                sendheader(commfd, response, 200, strlen(alltimestamps));
-                send(commfd, alltimestamps, strlen(alltimestamps), 0);
-
-                closedir(pdir);
-            }
-            else {                                      // normal GET operation
-			    if (access(filename, F_OK) == -1) {
-
-				    // 404 File Not Found
-				    errors = ERROR;
-				    sendheader(commfd, response, 404, 0);
-			    } 
-                else if (access(filename, R_OK) == -1) {
-
-				    // 403 Forbidden
-				    errors = ERROR;
-				    sendheader(commfd, response, 403, 0);
-			    } 
-                else {
-
-				    // get file size
-				    stat(filename, &st);
-				    filesize = st.st_size;
-
-				    sendheader(commfd, response, 200, filesize);
-
-				    // get file contents
-				    getfd = open(filename, O_RDONLY);
-				    while(read(getfd, buf, sizeof(char))) {
-					    send(commfd, buf, sizeof(char), 0);
-					    memset(&buf, 0, sizeof(buf));
+					    while(read(infd, buf, sizeof(char)) > 0) {
+						    write(getfd, buf, sizeof(char));
+						    memset(&buf, 0, sizeof(buf));
+					    }
+					    close(infd);
+					    close(getfd);
 				    }
-				    close(getfd);
-			    }
-            }
+                    sendheader(commfd, response, 200, 0);
+                }
+                else {
+                    sendheader(commfd, response, 404, 0);
+                }
+				closedir(pdir_r);
+
+				// 200 OK
+				// sendheader(commfd, response, 200, 0);
+			} else if(strcmp(filename, "r")==0) {
+
+				// recover latest backup file
+				struct dirent *dp;
+
+				// get latest timestamp
+				DIR *pdir = opendir("./");
+				int max = 0;
+				int current;
+				while((dp = readdir(pdir)) != NULL) {
+					if(strstr(dp->d_name, "backup-")) {
+						char *f = dp->d_name;
+						f += 7;
+						current = atoi(f);
+						if(current > max) { max = current; }
+					}
+				}				
+				closedir(pdir);
+
+				// copy to main directory
+				int infd;
+				char d[500];
+				char b[100] = "./backup-";
+				char maxstring[100];
+				sprintf(maxstring, "%d", max);
+				strcat(b, maxstring);
+				DIR *pdir_r = opendir(b);
+				while((dp = readdir(pdir_r)) != NULL) {
+
+					// ignore non backup directories
+					if(dp->d_type == DT_DIR) { continue; }
+
+					sprintf(d, "./%s/%s", b, dp->d_name);
+					infd = open(d, O_RDONLY);
+					getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+					while(read(infd, buf, sizeof(char)) > 0) {
+						write(getfd, buf, sizeof(char));
+						memset(&buf, 0, sizeof(buf));
+					}
+					close(infd);
+					close(getfd);
+				}
+				closedir(pdir_r);
+
+				// 200 OK
+				sendheader(commfd, response, 200, 0);
+			} else if(strcmp(filename, "b")==0) {
+
+				// create backup folder
+				int infd;
+				char seconds[50], d[500];
+				char b[] = "backup-";
+				time_t t = time(NULL);
+				sprintf(seconds, "%.f", difftime(t, (time_t) 0));
+				strcat(b, seconds);
+				mkdir(b, 0755);
+				struct dirent *dp;
+				DIR *pdir = opendir("./");
+				while((dp = readdir(pdir)) != NULL) {
+
+					// check if alpha numeric
+					for(char* i = filename; *i != '\0'; i++) {
+						if(isalnum(*i) == 0) { continue; } }
+					
+					// check if non directory and is 10 chars
+					if(dp->d_type == DT_DIR || strlen(dp->d_name) != 10) { continue; }
+
+					sprintf(d, "./%s/%s", b, dp->d_name);
+					infd = open(dp->d_name, O_RDONLY);
+					getfd = open(d, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+					while(read(infd, buf, sizeof(char)) > 0) {
+						write(getfd, buf, sizeof(char));
+						memset(&buf, 0, sizeof(buf));
+					}
+					close(infd);
+					close(getfd);
+				}
+				closedir(pdir);
+
+				// 200 OK
+				sendheader(commfd, response, 200, 0);
+			} else if(strcmp(filename, "l")==0) {
+
+				// list backup directories
+				int length = 0;
+				struct dirent *dp_main;
+				DIR *pdir_main = opendir("./");
+				while((dp_main = readdir(pdir_main)) != NULL) {
+
+					// ignore non backup directories
+					if(strstr(dp_main->d_name, "backup-") == NULL) { continue; }
+
+					send(commfd, dp_main->d_name, strlen(dp_main->d_name), 0);
+					send(commfd, ":", 1, 0);
+					send(commfd, "\n", 1, 0);
+					length += (strlen(dp_main->d_name) + 1 + 1);
+
+					struct dirent *dp;
+					DIR *pdir_backup = opendir(dp_main->d_name);
+					while((dp = readdir(pdir_backup)) != NULL) {
+
+						// ignore backup directories
+						if(dp->d_type == DT_DIR) { continue; }
+
+						send(commfd, dp->d_name, strlen(dp->d_name), 0);
+						send(commfd, "\n", 1, 0);
+						length += (strlen(dp->d_name) + 1);
+					}
+					send(commfd, "\n", 1, 0);
+					length++;
+
+					closedir(pdir_backup);
+				}
+				closedir(pdir_main);
+
+				// 200 OK
+				sendheader(commfd, response, 200, length);
+			} else if(access(filename, F_OK) == -1) {
+
+				// 404 File Not Found
+				errors = ERROR;
+				sendheader(commfd, response, 404, 0);
+			} else if(access(filename, R_OK) == -1) {
+
+				// 403 Forbidden
+				errors = ERROR;
+				sendheader(commfd, response, 403, 0);
+			} else {
+				
+				// get file size
+				stat(filename, &st);
+				filesize = st.st_size;
+
+				char *responseGet = new char[SIZE + filesize];
+
+				// 200 OK header
+				sendheader(commfd, responseGet, 200, filesize);
+
+				// send file contents
+				getfd = open(filename, O_RDONLY);
+				while(read(getfd, buf, sizeof(char)) > 0) {
+					send(commfd, buf, sizeof(char), 0);
+					memset(&buf, 0, sizeof(buf));
+				}
+				close(getfd);
+
+				delete[] responseGet;
+			}
 		}		
 		
 		// handling PUT request
-		memset(&buf, 0, sizeof(buf));
-		if ((strcmp(type, "PUT") == 0) && (errors == NO_ERROR_YET)) {
+		if((strcmp(type, "PUT") == 0) && (errors == NO_ERROR)) {
             
 			// get Content-Length
 			char* ptrlength = strstr(header, "Content-Length:");
 
-			if (ptrlength != NULL) {
+			// create / overwrite new file in directory
+			putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+			if(ptrlength != NULL) {
 
 				// get content if Content-Length is provided
 				sscanf(ptrlength, "Content-Length: %d", &contentlength);
-
-				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-
-				for (int i = contentlength; i > 0; i--) {
-					n = recv(commfd, buf, sizeof(char), 0);
-					if(n < 0) { warn("recv()"); }
-					if(n == 0) { break; }
-					write(STDOUT_FILENO, buf, sizeof(char));
-					write(putfd, buf, sizeof(char));
-					memset(&buf, 0, sizeof(buf));
-				}
-
-				close(putfd);
-
-				sendheader(commfd, response, 201, 0);
-
-			} 
-            else {
 				
-				// // get content if Content-Length is not provided
+				char *responsePut = new char[SIZE + contentlength];
 
-				putfd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-				sendheader(commfd, response, 201, 0);
+				// 201 Created header
+				sendheader(commfd, responsePut, 201, contentlength);
 
-				while (1) {
-					int amtRcv = recv(commfd, buf, sizeof(char), 0);
-					if (amtRcv == 0) {
-						break;
-					}
-					write(STDOUT_FILENO, buf, sizeof(char));
+				// put specified length of contents into file
+				for(int i = 0; i < contentlength; i++) {
+					errno = recv(commfd, buf, sizeof(char), 0);
+					if(errno < 0) { err(1, "recv()"); }
+					if(errno == 0) { break; }
 					write(putfd, buf, sizeof(char));
-					memset(&buf, 0, sizeof(buf));
+					memset(&buf, 0, sizeof(char));
 				}
 
-				close(putfd);
+				delete[] responsePut;
+			} else {
+			
+				// put content into file and get Content-Length
+				contentlength = recv(commfd, buf, sizeof(buf), 0);
+				if(contentlength < 0) { err(1, "recv()"); }
+				write(putfd, buf, contentlength);
 
+				char *responsePut = new char[SIZE + contentlength];
+				
+				// 201 Created header
+				sendheader(commfd, responsePut, 201, contentlength);
+
+				delete[] responsePut;
 			}
+			close(putfd);
 		}
 
 		// clear buffers
+		memset(&buf, 0, sizeof(buf));
 		memset(&header, 0, sizeof(header));
 		memset(&headercpy, 0, sizeof(headercpy));
 		memset(&response, 0, sizeof(response));
