@@ -60,11 +60,13 @@ int main(int argc, char* argv[]) {
 	int putfd, contentlength;
 	
 	// check cmd arg # & get port
-	if(argc == 2) {
+	if (argc == 2) {
 		port = 80;
-	} else if(argc == 3) {
+	} 
+    else if (argc == 3) {
 		port = atoi(argv[2]);
-	} else {
+	} 
+    else {
 		char usage[] = "USAGE: ./httpserver <address> <port-number>\n";
 		write(STDOUT_FILENO, usage, sizeof(char));
 	}
@@ -245,6 +247,7 @@ int main(int argc, char* argv[]) {
             }
             else if (rflag == 1) {
                 // do recovery code
+                // 
             }
             else if (r2flag == 1) {
                 // check if the timestamp exists
@@ -252,6 +255,27 @@ int main(int argc, char* argv[]) {
             }
             else if (lflag == 1) {
                 // send list of backups
+                char alltimestamps[5000];
+                struct dirent *dp;
+                DIR *pdir = opendir("./");
+                while ((dp = readdir(pdir)) != NULL) {
+                    if (dp->d_type == DT_DIR) {
+                        printf("%s\n", dp->d_name);
+                        char ts[10];
+                        char *dirpointer = strstr(dp->d_name, "backup-");
+                        if (dirpointer != NULL) {
+                            sscanf(dp->d_name, "backup-%s", ts);
+                            printf("%s\n", ts);
+                            sprintf(ts, "%s\n", ts);
+                            strcat(alltimestamps, ts);
+                        }
+                        
+                    }
+                }
+                sendheader(commfd, response, 200, strlen(alltimestamps));
+                send(commfd, alltimestamps, strlen(alltimestamps), 0);
+
+                closedir(pdir);
             }
             else {                                      // normal GET operation
 			    if (access(filename, F_OK) == -1) {
