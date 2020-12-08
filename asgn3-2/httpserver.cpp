@@ -172,7 +172,7 @@ int main(int argc, char* argv[]) {
 				int max = 0;
 				int current;
 				while((dp = readdir(pdir)) != NULL) {
-					if(strstr(dp->d_name, ".backup-")) {
+					if(strstr(dp->d_name, "backup-")) {
 						printf("file: %s, hit!\n", dp->d_name);
 						char *f = dp->d_name;
 						printf("numbers: %s\n", f);
@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
 				// copy to main directory
 				int infd;
 				char d[500];
-				char b[100] = ".backup-";
+				char b[100] = "backup-";
 				char maxstring[100];
 				sprintf(maxstring, "%d", max);
 				strcat(b, maxstring);
@@ -213,7 +213,7 @@ int main(int argc, char* argv[]) {
 				// create backup folder
 				int infd;
 				char seconds[50], d[500];
-				char b[] = ".backup-";
+				char b[] = "backup-";
 				time_t t = time(NULL);
 				sprintf(seconds, "%.f", difftime(t, (time_t) 0));
 				strcat(b, seconds);
