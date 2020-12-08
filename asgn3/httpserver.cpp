@@ -212,9 +212,10 @@ int main(int argc, char* argv[]) {
 				DIR *pdir = opendir("./");
 				int max = 0;
 				int current;
+                char *f;
 				while((dp = readdir(pdir)) != NULL) {
 					if(strstr(dp->d_name, "backup-")) {
-						char *f = dp->d_name;
+						f = dp->d_name;
 						f += 7;
 						current = atoi(f);
 						if(current > max) { max = current; }
@@ -222,34 +223,40 @@ int main(int argc, char* argv[]) {
 				}				
 				closedir(pdir);
 
-				// copy to main directory
-				int infd;
-				char d[500];
-				char b[100] = "./backup-";
-				char maxstring[100];
-				sprintf(maxstring, "%d", max);
-				strcat(b, maxstring);
-				DIR *pdir_r = opendir(b);
-				while((dp = readdir(pdir_r)) != NULL) {
+                if (f != NULL) {
+				    // copy to main directory
+				    int infd;
+				    char d[500];
+				    char b[100] = "./backup-";
+				    char maxstring[100];
+				    sprintf(maxstring, "%d", max);
+				    strcat(b, maxstring);
+				    DIR *pdir_r = opendir(b);
+				    while((dp = readdir(pdir_r)) != NULL) {
 
-					// ignore non backup directories
-					if(dp->d_type == DT_DIR) { continue; }
+					    // ignore non backup directories
+					    if(dp->d_type == DT_DIR) { continue; }
 
-					sprintf(d, "./%s/%s", b, dp->d_name);
-					infd = open(d, O_RDONLY);
-					getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+					    sprintf(d, "./%s/%s", b, dp->d_name);
+					    infd = open(d, O_RDONLY);
+					    getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
-					while(read(infd, buf, sizeof(char)) > 0) {
-						write(getfd, buf, sizeof(char));
-						memset(&buf, 0, sizeof(buf));
-					}
-					close(infd);
-					close(getfd);
-				}
-				closedir(pdir_r);
+					    while(read(infd, buf, sizeof(char)) > 0) {
+						    write(getfd, buf, sizeof(char));
+						    memset(&buf, 0, sizeof(buf));
+					    }
+					    close(infd);
+					    close(getfd);
+				    }
+				    closedir(pdir_r);
+                    sendheader(commfd, response, 200, 0);
+                }
+                else {
+                    sendheader(commfd, response, 404, 0);
+                }
 
 				// 200 OK
-				sendheader(commfd, response, 200, 0);
+				// sendheader(commfd, response, 200, 0);
 			} else if(strcmp(filename, "b")==0) {
 
 				// create backup folder
@@ -265,11 +272,11 @@ int main(int argc, char* argv[]) {
 				while((dp = readdir(pdir)) != NULL) {
 
 					// check if alpha numeric
-					for(char* i = filename; *i != '\0'; i++) {
+					for(char* i = dp->d_name; *i != '\0'; i++) {
 						if(isalnum(*i) == 0) { continue; } }
 					
 					// check if non directory and is 10 chars
-					if(dp->d_type == DT_DIR || strlen(dp->d_name) != 10) { continue; }
+					if(dp->d_type == DT_DIR || strlen(dp->d_name) != 10 || access(dp->d_name, R_OK) == -1) { continue; }
 
 					sprintf(d, "./%s/%s", b, dp->d_name);
 					infd = open(dp->d_name, O_RDONLY);
