@@ -223,7 +223,10 @@ int main(int argc, char* argv[]) {
 				DIR *pdir = opendir("./");
 				while((dp = readdir(pdir)) != NULL) {
 					printf("%s\n", dp->d_name);
-					if(dp->d_type == DT_DIR) { printf("hit\n"); continue; }
+					for(char* i = filename; *i != '\0'; i++) {
+						if(isalnum(*i) == 0) { continue; }
+					}
+					if(dp->d_type == DT_DIR || strlen(dp->d_name) != 10) { continue; }
 					sprintf(d, "./%s/%s", b, dp->d_name);
 					infd = open(dp->d_name, O_RDONLY);
 					getfd = open(d, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
