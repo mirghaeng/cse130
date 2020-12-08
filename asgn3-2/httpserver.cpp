@@ -169,6 +169,8 @@ int main(int argc, char* argv[]) {
 		if((strcmp(type, "GET") == 0) && (errors == NO_ERROR)) {
 
 			if(strcmp(filename, "r")==0 && timestamp!=NULL) {
+
+				// recover specified backup file
 				struct dirent *dp;
 				int infd;
 				char d[500];
@@ -176,11 +178,14 @@ int main(int argc, char* argv[]) {
 				strcat(b, timestamp);
 				DIR *pdir_r = opendir(b);
 				while((dp = readdir(pdir_r)) != NULL) {
-					printf("%s\n", dp->d_name);
-					if(dp->d_type == DT_DIR) { printf("hit\n"); continue; }
+
+					// ignore non backup directories
+					if(dp->d_type == DT_DIR) { continue; }
+
 					sprintf(d, "./%s/%s", b, dp->d_name);
 					infd = open(d, O_RDONLY);
 					getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
 					while(read(infd, buf, sizeof(char)) > 0) {
 						write(getfd, buf, sizeof(char));
 						memset(&buf, 0, sizeof(buf));
@@ -189,25 +194,26 @@ int main(int argc, char* argv[]) {
 					close(getfd);
 				}
 				closedir(pdir_r);
+
+				// 200 OK
 				sendheader(commfd, response, 200, 0);
 			} else if(strcmp(filename, "r")==0) {
 
+				// recover latest backup file
 				struct dirent *dp;
+
+				// get latest timestamp
 				DIR *pdir = opendir("./");
 				int max = 0;
 				int current;
 				while((dp = readdir(pdir)) != NULL) {
 					if(strstr(dp->d_name, "backup-")) {
-						printf("file: %s, hit!\n", dp->d_name);
 						char *f = dp->d_name;
-						printf("numbers: %s\n", f);
 						f += 7;
 						current = atoi(f);
-						printf("current: %d\n", current);
 						if(current > max) { max = current; }
 					}
 				}				
-				printf("max: %d\n", max);
 				closedir(pdir);
 
 				// copy to main directory
@@ -217,14 +223,16 @@ int main(int argc, char* argv[]) {
 				char maxstring[100];
 				sprintf(maxstring, "%d", max);
 				strcat(b, maxstring);
-				printf("b: %s\n", b);
 				DIR *pdir_r = opendir(b);
 				while((dp = readdir(pdir_r)) != NULL) {
-					printf("%s\n", dp->d_name);
-					if(dp->d_type == DT_DIR) { printf("hit\n"); continue; }
+
+					// ignore non backup directories
+					if(dp->d_type == DT_DIR) { continue; }
+
 					sprintf(d, "./%s/%s", b, dp->d_name);
 					infd = open(d, O_RDONLY);
 					getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
 					while(read(infd, buf, sizeof(char)) > 0) {
 						write(getfd, buf, sizeof(char));
 						memset(&buf, 0, sizeof(buf));
@@ -233,6 +241,8 @@ int main(int argc, char* argv[]) {
 					close(getfd);
 				}
 				closedir(pdir_r);
+
+				// 200 OK
 				sendheader(commfd, response, 200, 0);
 			} else if(strcmp(filename, "b")==0) {
 
@@ -243,20 +253,22 @@ int main(int argc, char* argv[]) {
 				time_t t = time(NULL);
 				sprintf(seconds, "%.f", difftime(t, (time_t) 0));
 				strcat(b, seconds);
-				printf("%s\n", b);
 				mkdir(b, 0755);
 				struct dirent *dp;
 				DIR *pdir = opendir("./");
 				while((dp = readdir(pdir)) != NULL) {
-					printf("%s\n", dp->d_name);
+
+					// check if alpha numeric
 					for(char* i = filename; *i != '\0'; i++) {
-						if(isalnum(*i) == 0) { continue; }
-					}
+						if(isalnum(*i) == 0) { continue; } }
+					
+					// check if non directory and is 10 chars
 					if(dp->d_type == DT_DIR || strlen(dp->d_name) != 10) { continue; }
+
 					sprintf(d, "./%s/%s", b, dp->d_name);
 					infd = open(dp->d_name, O_RDONLY);
 					getfd = open(d, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-					printf("starting while loop\n");
+
 					while(read(infd, buf, sizeof(char)) > 0) {
 						write(getfd, buf, sizeof(char));
 						memset(&buf, 0, sizeof(buf));
@@ -265,25 +277,45 @@ int main(int argc, char* argv[]) {
 					close(getfd);
 				}
 				closedir(pdir);
+
+				// 200 OK
 				sendheader(commfd, response, 200, 0);
 			} else if(strcmp(filename, "l")==0) {
-				sendheader(commfd, response, 200, 0);
+
+				// list backup directories
+				int length = 0;
 				struct dirent *dp_main;
 				DIR *pdir_main = opendir("./");
 				while((dp_main = readdir(pdir_main)) != NULL) {
+
+					// ignore non backup directories
 					if(strstr(dp_main->d_name, "backup-") == NULL) { continue; }
-					printf("directory: %s\n", dp_main->d_name);
-					//send(commfd, dp_main->d_name, strlen(dp_main->d_name), 0);
+
+					send(commfd, dp_main->d_name, strlen(dp_main->d_name), 0);
+					send(commfd, ":", 1, 0);
+					send(commfd, "\n", 1, 0);
+					length += (strlen(dp_main->d_name) + 1 + 1);
+
 					struct dirent *dp;
-					DIR *pdir_r = opendir(dp_main->d_name);
-					while((dp = readdir(pdir_r)) != NULL) {
+					DIR *pdir_backup = opendir(dp_main->d_name);
+					while((dp = readdir(pdir_backup)) != NULL) {
+
+						// ignore backup directories
 						if(dp->d_type == DT_DIR) { continue; }
-						printf("file: %s\n", dp->d_name);
+
+						send(commfd, dp->d_name, strlen(dp->d_name), 0);
+						send(commfd, "\n", 1, 0);
+						length += (strlen(dp->d_name) + 1);
 					}
-					printf("\n");
-					closedir(pdir_r);
+					send(commfd, "\n", 1, 0);
+					length++;
+
+					closedir(pdir_backup);
 				}
 				closedir(pdir_main);
+
+				// 200 OK
+				sendheader(commfd, response, 200, length);
 			} else if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
