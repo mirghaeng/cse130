@@ -127,6 +127,7 @@ int main(int argc, char* argv[]) {
 		path = strtok(NULL, " ");
 		path++;
 
+        char *rpointer = strstr(path, "r/");
 		// get timestamp
 		char *filename = strtok(path, "/");
 		char *timestamp = strtok(NULL, "/");
@@ -138,6 +139,11 @@ int main(int argc, char* argv[]) {
 			errors = ERROR;
 			sendheader(commfd, response, 400, 0);
 		}
+
+        if (rpointer != NULL && timestamp == NULL) {
+            errors = ERROR;
+            sendheader(commfd, response, 400, 0);
+        }
 		
 		// check filename is alphanumeric
 		for(char* i = filename; *i != '\0'; i++) {
