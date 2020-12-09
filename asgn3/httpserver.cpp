@@ -192,8 +192,8 @@ int main(int argc, char* argv[]) {
 
 					    sprintf(d, "./%s/%s", b, dp->d_name);
 
-                        // ignore if backup file doesn't have reading access or main directory file doesn't have writing access
-                        if (access(d, R_OK) == -1 || access(dp->d_name, W_OK) == -1) { continue; }
+                        // ignore if backup file doesn't have reading access or main directory file doesn't have writing access and it exists
+                        if (access(d, R_OK) == -1 || (access(dp->d_name, W_OK) == -1 && access(dp->d_name, F_OK) != -1)) { continue; }
 
 					    infd = open(d, O_RDONLY);
 					    getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -252,8 +252,8 @@ int main(int argc, char* argv[]) {
 
 					        sprintf(d, "./%s/%s", b, dp->d_name);
 
-                            // ignore if backup file doesn't have reading access or main directory file doesn't have writing access
-                            if (access(d, R_OK) == -1 || access(dp->d_name, W_OK) == -1) { continue; }
+                            // ignore if backup file doesn't have reading access or main directory file doesn't have writing access and it exists
+                            if (access(d, R_OK) == -1 || (access(dp->d_name, W_OK) == -1 && access(dp->d_name, F_OK) != -1)) { continue; }
 
 					        infd = open(d, O_RDONLY);
 					        getfd = open(dp->d_name, O_CREAT | O_WRONLY | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
