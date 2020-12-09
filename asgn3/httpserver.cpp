@@ -226,7 +226,7 @@ int main(int argc, char* argv[]) {
 				int current;
                 char *f;
 				while((dp = readdir(pdir)) != NULL) {
-					if(strstr(dp->d_name, "backup-")) {
+					if(strstr(dp->d_name, "backup-") && dp->d_type == DT_DIR) {
 						f = dp->d_name;
 						f += 7;
 						current = atoi(f);
