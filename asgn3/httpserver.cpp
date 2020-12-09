@@ -316,39 +316,31 @@ int main(int argc, char* argv[]) {
 			} else if(strcmp(filename, "l")==0) {
 
 				// list backup directories
-				int length = 0;
-				struct dirent *dp_main;
-				DIR *pdir_main = opendir("./");
-				while((dp_main = readdir(pdir_main)) != NULL) {
 
-					// ignore non backup directories
-					if(strstr(dp_main->d_name, "backup-") == NULL) { continue; }
+                for (int i = 0; i < 2; i++) {
+                    int length = 0;
+				    struct dirent *dp_main;
+				    DIR *pdir_main = opendir("./");
+				    while((dp_main = readdir(pdir_main)) != NULL) {
 
-					send(commfd, dp_main->d_name, strlen(dp_main->d_name), 0);
-					send(commfd, ":", 1, 0);
-					send(commfd, "\n", 1, 0);
-					length += (strlen(dp_main->d_name) + 1 + 1);
+                        char ts[20];
+                        if (dp_main->d_type == DT_DIR && strstr(dp_main->d_name, "backup-") != NULL) {
+                            sscanf(dp_main->d_name, "backup-%s", ts);
+                            sprintf(ts, "%s\n", ts);
+                            length += strlen(ts);
+                            if (i == 1) {
+                                send(commfd, ts, strlen(ts), 0);
+                            }
+                        }
+				    }
+				    closedir(pdir_main);
 
-					struct dirent *dp;
-					DIR *pdir_backup = opendir(dp_main->d_name);
-					while((dp = readdir(pdir_backup)) != NULL) {
+				    // 200 OK
+                    if (i == 0) {
+				        sendheader(commfd, response, 200, length);
+                    }
+                }
 
-						// ignore backup directories
-						if(dp->d_type == DT_DIR) { continue; }
-
-						send(commfd, dp->d_name, strlen(dp->d_name), 0);
-						send(commfd, "\n", 1, 0);
-						length += (strlen(dp->d_name) + 1);
-					}
-					send(commfd, "\n", 1, 0);
-					length++;
-
-					closedir(pdir_backup);
-				}
-				closedir(pdir_main);
-
-				// 200 OK
-				sendheader(commfd, response, 200, length);
 			} else if(access(filename, F_OK) == -1) {
 
 				// 404 File Not Found
