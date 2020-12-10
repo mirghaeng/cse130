@@ -8,4 +8,3 @@ httpserver.o: httpserver.cpp
 
 clean:
 	rm *.o httpserver
-#:)
