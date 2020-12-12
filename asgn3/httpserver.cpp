@@ -213,8 +213,6 @@ int main(int argc, char* argv[]) {
                 }
 				closedir(pdir_r);
 
-				// 200 OK
-				// sendheader(commfd, response, 200, 0);
 			} else if(strcmp(filename, "r")==0) {
 
 				// recover latest backup file
@@ -275,8 +273,6 @@ int main(int argc, char* argv[]) {
                     sendheader(commfd, response, 404, 0);
                 }
 
-				// 200 OK
-				// sendheader(commfd, response, 200, 0);
 			} else if(strcmp(filename, "b")==0) {
 
 				// create backup folder
@@ -391,7 +387,7 @@ int main(int argc, char* argv[]) {
 				char *responsePut = new char[SIZE + contentlength];
 
 				// 201 Created header
-				sendheader(commfd, responsePut, 201, contentlength);
+				sendheader(commfd, responsePut, 201, 0);
 
 				// put specified length of contents into file
 				for(int i = 0; i < contentlength; i++) {
@@ -413,7 +409,7 @@ int main(int argc, char* argv[]) {
 				char *responsePut = new char[SIZE + contentlength];
 				
 				// 201 Created header
-				sendheader(commfd, responsePut, 201, contentlength);
+				sendheader(commfd, responsePut, 201, 0);
 
 				delete[] responsePut;
 			}
